@@ -79,6 +79,10 @@ use smithay::wayland::compositor::{
 };
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::dmabuf::DmabufState;
+use smithay::wayland::color_management::{ColorManagementCapabilities, ColorManagementState};
+use smithay::wayland::color_representation::{
+    ColorRepresentationCapabilities, ColorRepresentationState,
+};
 use smithay::wayland::fractional_scale::FractionalScaleManagerState;
 use smithay::wayland::idle_inhibit::IdleInhibitManagerState;
 use smithay::wayland::idle_notify::IdleNotifierState;
@@ -287,6 +291,8 @@ pub struct Niri {
     pub xdg_foreign_state: XdgForeignState,
     pub shm_state: ShmState,
     pub output_manager_state: OutputManagerState,
+    pub color_management_state: ColorManagementState,
+    pub color_representation_state: ColorRepresentationState,
     pub dmabuf_state: DmabufState,
     pub fractional_scale_manager_state: FractionalScaleManagerState,
     pub seat_state: SeatState<State>,
@@ -765,6 +771,10 @@ impl State {
         self.niri.advance_animations();
 
         self.niri.redraw_queued_outputs(&mut self.backend);
+
+        // Destructor events queued by color-management dispatch must be sent
+        // outside dispatch callbacks (wayland-backend panics otherwise).
+        self.niri.color_management_state.flush_pending();
 
         {
             let _span = tracy_client::span!("flush_clients");
@@ -2301,6 +2311,14 @@ impl Niri {
         );
         let output_manager_state =
             OutputManagerState::new_with_xdg_output::<State>(&display_handle);
+        let color_management_state = ColorManagementState::new::<State>(
+            &display_handle,
+            ColorManagementCapabilities::conservative(),
+        );
+        let color_representation_state = ColorRepresentationState::new::<State>(
+            &display_handle,
+            ColorRepresentationCapabilities::conservative(),
+        );
         let dmabuf_state = DmabufState::new();
         let fractional_scale_manager_state =
             FractionalScaleManagerState::new::<State>(&display_handle);
@@ -2547,6 +2565,8 @@ impl Niri {
             virtual_pointer_state,
             shm_state,
             output_manager_state,
+            color_management_state,
+            color_representation_state,
             dmabuf_state,
             fractional_scale_manager_state,
             seat_state,

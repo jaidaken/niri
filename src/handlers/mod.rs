@@ -25,6 +25,10 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::{Logical, Point, Rectangle, Serial};
 use smithay::wayland::compositor::{get_parent, with_states};
+use smithay::wayland::color_management::{ColorManagementHandler, ColorManagementState};
+use smithay::wayland::color_representation::{
+    ColorRepresentationHandler, ColorRepresentationState,
+};
 use smithay::wayland::dmabuf::{DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier};
 use smithay::wayland::drm_lease::{
     DrmLease, DrmLeaseBuilder, DrmLeaseHandler, DrmLeaseRequest, DrmLeaseState, LeaseRejected,
@@ -62,8 +66,9 @@ use smithay::wayland::xdg_activation::{
     XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData,
 };
 use smithay::{
-    delegate_cursor_shape, delegate_data_control, delegate_data_device, delegate_dmabuf,
-    delegate_drm_lease, delegate_ext_data_control, delegate_fractional_scale,
+    delegate_color_management, delegate_color_representation, delegate_cursor_shape,
+    delegate_data_control, delegate_data_device, delegate_dmabuf, delegate_drm_lease,
+    delegate_ext_data_control, delegate_fractional_scale,
     delegate_idle_inhibit, delegate_idle_notify, delegate_input_method_manager,
     delegate_keyboard_shortcuts_inhibit, delegate_output, delegate_pointer_constraints,
     delegate_pointer_gestures, delegate_presentation, delegate_primary_selection,
@@ -844,6 +849,22 @@ delegate_xdg_activation!(State);
 
 impl FractionalScaleHandler for State {}
 delegate_fractional_scale!(State);
+
+// P1 stub: default trait methods advertise sRGB for everything. Real
+// per-output HDR descriptions arrive with the signaling phase.
+impl ColorManagementHandler for State {
+    fn color_management_state(&mut self) -> &mut ColorManagementState {
+        &mut self.niri.color_management_state
+    }
+}
+delegate_color_management!(State);
+
+impl ColorRepresentationHandler for State {
+    fn color_representation_state(&mut self) -> &mut ColorRepresentationState {
+        &mut self.niri.color_representation_state
+    }
+}
+delegate_color_representation!(State);
 
 impl OutputManagementHandler for State {
     fn output_management_state(&mut self) -> &mut OutputManagementManagerState {

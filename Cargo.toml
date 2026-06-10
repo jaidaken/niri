@@ -188,3 +188,7 @@ assets = [
     ["resources/niri.service", "/usr/lib/systemd/user/", "644"],
     ["resources/niri-shutdown.target", "/usr/lib/systemd/user/", "644"],
 ]
+
+[patch."https://github.com/Smithay/smithay.git"]
+smithay = { path = "../smithay-hdr" }
+smithay-drm-extras = { path = "../smithay-hdr/smithay-drm-extras" }
