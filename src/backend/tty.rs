@@ -1367,6 +1367,29 @@ impl Tty {
             }
         }
 
+        // Signaling-only, no CRTC color blobs: hardware LUT/CTM commits wedge NVIDIA's GSP.
+        if let Some(hdr) = config.hdr {
+            match crate::backend::hdr::signaling_state(
+                &device.drm,
+                connector.handle(),
+                hdr.ref_white,
+            ) {
+                Ok(state) => match surface.set_hdr_state(connector.handle(), Some(state)) {
+                    Ok(()) => {
+                        info!(
+                            "HDR10 signaling enabled on {connector_name} \
+                             (BT.2020/PQ, ref white {} nits)",
+                            hdr.ref_white,
+                        );
+                    }
+                    Err(err) => warn!("error staging HDR state: {err:?}"),
+                },
+                Err(err) => {
+                    warn!("cannot enable HDR on {connector_name}: {err:?}");
+                }
+            }
+        }
+
         // Update the output mode.
         let (physical_width, physical_height) = connector.size().unwrap_or((0, 0));
 

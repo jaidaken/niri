@@ -850,14 +850,84 @@ delegate_xdg_activation!(State);
 impl FractionalScaleHandler for State {}
 delegate_fractional_scale!(State);
 
-// P1 stub: default trait methods advertise sRGB for everything. Real
-// per-output HDR descriptions arrive with the signaling phase.
 impl ColorManagementHandler for State {
     fn color_management_state(&mut self) -> &mut ColorManagementState {
         &mut self.niri.color_management_state
     }
+
+    fn output_image_description(
+        &mut self,
+        wl_output: &WlOutput,
+    ) -> Arc<smithay::wayland::color_management::ImageDescription> {
+        let hdr = Output::from_resource(wl_output).and_then(|o| self.output_hdr_config(&o));
+        match hdr {
+            Some(hdr) => synthesize_hdr_description(self, hdr),
+            None => self.niri.color_management_state.interner().srgb_default(),
+        }
+    }
+
+    fn preferred_image_description(
+        &mut self,
+        surface: &WlSurface,
+    ) -> Arc<smithay::wayland::color_management::ImageDescription> {
+        let primary = with_states(surface, |states| {
+            smithay::desktop::utils::surface_primary_scanout_output(surface, states)
+        });
+        let hdr = primary.and_then(|o| self.output_hdr_config(&o));
+        match hdr {
+            Some(hdr) => synthesize_hdr_description(self, hdr),
+            None => self.niri.color_management_state.interner().srgb_default(),
+        }
+    }
 }
 delegate_color_management!(State);
+
+impl State {
+    fn output_hdr_config(&self, output: &Output) -> Option<niri_config::output::Hdr> {
+        let name = output.user_data().get::<niri_config::OutputName>()?;
+        self.niri.config.borrow().outputs.find(name).and_then(|c| c.hdr)
+    }
+}
+
+// PQ/BT.2020 description matching the signaling we stage on the connector.
+// Luminance constants mirror backend::hdr::HdrLuminance::for_sdr_content.
+fn synthesize_hdr_description(
+    state: &mut State,
+    hdr: niri_config::output::Hdr,
+) -> Arc<smithay::wayland::color_management::ImageDescription> {
+    use smithay::reexports::wayland_protocols::wp::color_management::v1::server::wp_color_manager_v1::{
+        Primaries, TransferFunction,
+    };
+    use smithay::wayland::color_management::{
+        ImageDescription, Luminances, MasteringLuminance, PrimariesDef, TransferFunctionDef,
+    };
+
+    let ref_white = hdr.ref_white.clamp(80., 1000.) as u32;
+    let description = ImageDescription {
+        primaries: Some(PrimariesDef::Named(Primaries::Bt2020)),
+        transfer_function: Some(TransferFunctionDef::Named(TransferFunction::St2084Pq)),
+        luminances: Some(Luminances {
+            min_lum: 50,
+            max_lum: 400,
+            reference_lum: ref_white,
+        }),
+        mastering_primaries: None,
+        mastering_luminance: Some(MasteringLuminance {
+            min_lum: 50,
+            max_lum: 400,
+        }),
+        max_cll: Some(ref_white),
+        max_fall: Some(ref_white * 2 / 5),
+        icc: None,
+        windows_scrgb: false,
+        identity: 0,
+    };
+    state
+        .niri
+        .color_management_state
+        .interner_mut()
+        .intern(description)
+}
 
 impl ColorRepresentationHandler for State {
     fn color_representation_state(&mut self) -> &mut ColorRepresentationState {

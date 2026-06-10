@@ -68,6 +68,8 @@ pub struct Output {
     #[knuffel(child)]
     pub variable_refresh_rate: Option<Vrr>,
     #[knuffel(child)]
+    pub hdr: Option<Hdr>,
+    #[knuffel(child)]
     pub focus_at_startup: bool,
     // Deprecated; use layout.background_color.
     #[knuffel(child)]
@@ -107,6 +109,7 @@ impl Default for Output {
             mode: None,
             modeline: None,
             variable_refresh_rate: None,
+            hdr: None,
             background_color: None,
             backdrop_color: None,
             hot_corners: None,
@@ -138,6 +141,20 @@ pub struct MaxBpc(pub niri_ipc::MaxBpc);
 pub struct Vrr {
     #[knuffel(property, default = false)]
     pub on_demand: bool,
+}
+
+/// HDR10 output signaling (BT.2020 primaries + PQ transfer).
+#[derive(knuffel::Decode, Debug, Clone, Copy, PartialEq)]
+pub struct Hdr {
+    /// Luminance (nits) SDR white maps to; 203 = BT.2408 reference.
+    #[knuffel(property, default = 203.)]
+    pub ref_white: f64,
+}
+
+impl Default for Hdr {
+    fn default() -> Self {
+        Self { ref_white: 203. }
+    }
 }
 
 impl FromIterator<Output> for Outputs {
