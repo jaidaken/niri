@@ -682,28 +682,24 @@ impl Tty {
                     // Apply pending gamma changes and restore our existing gamma.
                     let device = self.devices.get_mut(&node).unwrap();
                     for (crtc, surface) in device.surfaces.iter_mut() {
+                        let (max_bpc, hdr) = {
+                            let config = self.config.borrow();
+                            let out = config.outputs.find(&surface.name);
+                            (out.and_then(|o| o.max_bpc), out.and_then(|o| o.hdr))
+                        };
+
                         if let Ok(mut props) =
                             ConnectorProperties::try_new(&device.drm, surface.connector)
                         {
-                            let max_bpc = self
-                                .config
-                                .borrow()
-                                .outputs
-                                .find(&surface.name)
-                                .and_then(|o| o.max_bpc);
-                            set_connector_properties(&mut props, max_bpc, true);
+                            // No reset on HDR-managed outputs: reset-then-restage
+                            // double-transitions the wedge-prone nvidia engine.
+                            set_connector_properties(&mut props, max_bpc, hdr.is_none());
                         } else {
                             warn!("failed to get connector properties");
                         }
 
-                        // Resume reset HDR props above and smithay cleared its tracking;
-                        // re-stage or the panel is left in a wedged half-HDR state.
-                        let hdr = self
-                            .config
-                            .borrow()
-                            .outputs
-                            .find(&surface.name)
-                            .and_then(|o| o.hdr);
+                        // smithay reset_state cleared HDR tracking on suspend;
+                        // re-stage or the panel is left half-HDR (wedge per hdr.rs docs).
                         if let Some(hdr) = hdr {
                             match crate::backend::hdr::signaling_state(
                                 &device.drm,
@@ -1349,7 +1345,9 @@ impl Tty {
 
         let mut orientation = None;
         if let Ok(mut props) = ConnectorProperties::try_new(&device.drm, connector.handle()) {
-            set_connector_properties(&mut props, config.max_bpc, true);
+            // reset_hdr only when we don't manage HDR here: reset-then-restage
+            // double-transitions the wedge-prone nvidia display engine.
+            set_connector_properties(&mut props, config.max_bpc, config.hdr.is_none());
 
             match props.get_panel_orientation() {
                 Ok(x) => orientation = Some(x),
