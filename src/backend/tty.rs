@@ -696,6 +696,43 @@ impl Tty {
                             warn!("failed to get connector properties");
                         }
 
+                        // Resume reset HDR props above and smithay cleared its tracking;
+                        // re-stage or the panel is left in a wedged half-HDR state.
+                        let hdr = self
+                            .config
+                            .borrow()
+                            .outputs
+                            .find(&surface.name)
+                            .and_then(|o| o.hdr);
+                        if let Some(hdr) = hdr {
+                            match crate::backend::hdr::signaling_state(
+                                &device.drm,
+                                surface.connector,
+                                hdr.ref_white,
+                            ) {
+                                Ok(state) => {
+                                    if let Err(err) = surface
+                                        .compositor
+                                        .surface()
+                                        .set_hdr_state(surface.connector, Some(state))
+                                    {
+                                        warn!("error re-staging HDR on resume: {err:?}");
+                                    } else {
+                                        info!(
+                                            "HDR10 signaling re-staged on {} after resume",
+                                            surface.name.connector,
+                                        );
+                                    }
+                                }
+                                Err(err) => {
+                                    warn!(
+                                        "cannot re-enable HDR on {}: {err:?}",
+                                        surface.name.connector,
+                                    );
+                                }
+                            }
+                        }
+
                         if let Some(ramp) = surface.pending_gamma_change.take() {
                             let ramp = ramp.as_deref();
                             let res = if let Some(gamma_props) = &mut surface.gamma_props {
