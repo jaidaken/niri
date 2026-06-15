@@ -382,6 +382,8 @@ struct Surface {
     gamma_props: Option<GammaProps>,
     /// Gamma change to apply upon session resume.
     pending_gamma_change: Option<Option<Vec<u16>>>,
+    /// Staged HDR_OUTPUT_METADATA blob, freed on re-stage or disconnect.
+    hdr_metadata_blob_id: Option<NonZeroU64>,
     /// Tracy frame that goes from vblank to vblank.
     vblank_frame: Option<tracy_client::Frame>,
     /// Frame name for the VBlank frame.
@@ -717,24 +719,34 @@ impl Tty {
                             warn!("failed to get connector properties");
                         }
 
-                        // smithay reset_state cleared HDR tracking on suspend;
-                        // re-stage or the panel is left half-HDR (wedge per hdr.rs docs).
+                        // The driver drops HDR signaling on VT-switch; re-stage it.
                         if let Some(hdr) = hdr {
                             match crate::backend::hdr::signaling_state(
                                 &device.drm,
                                 surface.connector,
                                 hdr.ref_white,
                             ) {
-                                Ok(state) => {
+                                Ok((state, blob_id)) => {
                                     if let Err(err) = surface
                                         .compositor
                                         .surface()
                                         .set_hdr_state(surface.connector, Some(state))
                                     {
                                         warn!("error re-staging HDR on resume: {err:?}");
+                                        let _ = device.drm.destroy_property_blob(blob_id);
                                     } else {
+                                        if let Some(old) = std::mem::replace(
+                                            &mut surface.hdr_metadata_blob_id,
+                                            NonZeroU64::new(blob_id),
+                                        ) {
+                                            if let Err(err) =
+                                                device.drm.destroy_property_blob(old.get())
+                                            {
+                                                warn!("failed to free old HDR blob: {err}");
+                                            }
+                                        }
                                         info!(
-                                            "HDR10 signaling re-staged on {} after resume",
+                                            "HDR10 re-staged on {} after resume (blob {blob_id})",
                                             surface.name.connector,
                                         );
                                     }
@@ -833,6 +845,10 @@ impl Tty {
             let _span = tracy_client::span!("DrmDevice::new");
             DrmDevice::new(device_fd.clone(), false)
         }?;
+
+        if let Ok(driver) = smithay::reexports::drm::Device::get_driver(&drm) {
+            info!("DRM device {path:?} driver: {}", driver.name().to_string_lossy());
+        }
         let gbm = {
             let _span = tracy_client::span!("GbmDevice::new");
             GbmDevice::new(device_fd)
@@ -1420,22 +1436,29 @@ impl Tty {
         }
 
         // Signaling-only, no CRTC color blobs: hardware LUT/CTM commits wedge NVIDIA's GSP.
+        let mut hdr_metadata_blob_id = None;
         if let Some(hdr) = config.hdr {
             match crate::backend::hdr::signaling_state(
                 &device.drm,
                 connector.handle(),
                 hdr.ref_white,
             ) {
-                Ok(state) => match surface.set_hdr_state(connector.handle(), Some(state)) {
-                    Ok(()) => {
-                        info!(
-                            "HDR10 signaling enabled on {connector_name} \
-                             (BT.2020/PQ, ref white {} nits)",
-                            hdr.ref_white,
-                        );
+                Ok((state, blob_id)) => {
+                    match surface.set_hdr_state(connector.handle(), Some(state)) {
+                        Ok(()) => {
+                            hdr_metadata_blob_id = NonZeroU64::new(blob_id);
+                            info!(
+                                "HDR10 signaling enabled on {connector_name} \
+                                 (BT.2020/PQ, ref white {} nits, blob {blob_id})",
+                                hdr.ref_white,
+                            );
+                        }
+                        Err(err) => {
+                            warn!("error staging HDR state: {err:?}");
+                            let _ = device.drm.destroy_property_blob(blob_id);
+                        }
                     }
-                    Err(err) => warn!("error staging HDR state: {err:?}"),
-                },
+                }
                 Err(err) => {
                     warn!("cannot enable HDR on {connector_name}: {err:?}");
                 }
@@ -1613,6 +1636,7 @@ impl Tty {
             dmabuf_feedback,
             gamma_props,
             pending_gamma_change: None,
+            hdr_metadata_blob_id,
             vblank_frame: None,
             vblank_frame_name,
             time_since_presentation_plot_name,
@@ -1669,6 +1693,12 @@ impl Tty {
         };
 
         debug!("disconnecting connector: {:?}", surface.name.connector);
+
+        if let Some(blob) = surface.hdr_metadata_blob_id {
+            if let Err(err) = device.drm.destroy_property_blob(blob.get()) {
+                warn!("failed to free HDR blob on disconnect: {err}");
+            }
+        }
 
         let output = niri
             .global_space

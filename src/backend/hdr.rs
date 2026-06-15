@@ -132,18 +132,20 @@ pub fn create_hdr_metadata_blob(dev: &impl ControlDevice, lum: HdrLuminance) -> 
     Ok(blob.into())
 }
 
-/// Resolve everything needed for signaling-only HDR10 on this connector.
-/// Returns the `HdrState` to stage on the surface.
+/// Resolve signaling-only HDR10 for this connector. Returns the `HdrState` to
+/// stage plus the raw HDR_OUTPUT_METADATA blob ID, which the caller owns and
+/// must `destroy_property_blob` on re-stage or teardown (blobs persist until
+/// the DRM fd closes, drm_property.c).
 pub fn signaling_state(
     dev: &impl ControlDevice,
     conn: connector::Handle,
     ref_white_nits: f64,
-) -> Result<HdrState> {
+) -> Result<(HdrState, u64)> {
     if !connector_supports_hdr(dev, conn) {
         return Err(anyhow!("connector does not advertise HDR support"));
     }
     let colorspace = colorspace_enum_value(dev, conn, "BT2020_RGB")?;
     let ref_white = ref_white_nits.clamp(80., 1000.) as u16;
     let blob = create_hdr_metadata_blob(dev, HdrLuminance::for_sdr_content(ref_white))?;
-    Ok(HdrState::signaling_only(colorspace, blob))
+    Ok((HdrState::signaling_only(colorspace, blob), blob))
 }
