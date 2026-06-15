@@ -603,6 +603,27 @@ impl Tty {
                 self.libinput.suspend();
 
                 for device in self.devices.values_mut() {
+                    // An HDR-active connector carried across a VT-switch wedges the nvidia display engine.
+                    for surface in device.surfaces.values() {
+                        let is_hdr = self
+                            .config
+                            .borrow()
+                            .outputs
+                            .find(&surface.name)
+                            .is_some_and(|o| o.hdr.is_some());
+                        if is_hdr {
+                            if let Ok(mut props) =
+                                ConnectorProperties::try_new(&device.drm, surface.connector)
+                            {
+                                set_connector_properties(&mut props, None, true);
+                                info!(
+                                    "HDR torn down to SDR on {} before VT yield",
+                                    surface.name.connector
+                                );
+                            }
+                        }
+                    }
+
                     device.drm.pause();
 
                     if let Some(lease_state) = &mut device.drm_lease_state {
@@ -691,9 +712,7 @@ impl Tty {
                         if let Ok(mut props) =
                             ConnectorProperties::try_new(&device.drm, surface.connector)
                         {
-                            // No reset on HDR-managed outputs: reset-then-restage
-                            // double-transitions the wedge-prone nvidia engine.
-                            set_connector_properties(&mut props, max_bpc, hdr.is_none());
+                            set_connector_properties(&mut props, max_bpc, true);
                         } else {
                             warn!("failed to get connector properties");
                         }
@@ -1345,9 +1364,7 @@ impl Tty {
 
         let mut orientation = None;
         if let Ok(mut props) = ConnectorProperties::try_new(&device.drm, connector.handle()) {
-            // reset_hdr only when we don't manage HDR here: reset-then-restage
-            // double-transitions the wedge-prone nvidia display engine.
-            set_connector_properties(&mut props, config.max_bpc, config.hdr.is_none());
+            set_connector_properties(&mut props, config.max_bpc, true);
 
             match props.get_panel_orientation() {
                 Ok(x) => orientation = Some(x),
