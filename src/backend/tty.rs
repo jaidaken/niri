@@ -606,7 +606,7 @@ impl Tty {
 
                 for device in self.devices.values_mut() {
                     // An HDR-active connector carried across a VT-switch wedges the nvidia display engine.
-                    for surface in device.surfaces.values() {
+                    for surface in device.surfaces.values_mut() {
                         let is_hdr = self
                             .config
                             .borrow()
@@ -622,6 +622,12 @@ impl Tty {
                                     "HDR torn down to SDR on {} before VT yield",
                                     surface.name.connector
                                 );
+                            }
+                            // Connector is SDR now; free the no-longer-referenced blob.
+                            if let Some(old) = surface.hdr_metadata_blob_id.take() {
+                                if let Err(err) = device.drm.destroy_property_blob(old.get()) {
+                                    warn!("failed to free HDR blob on VT yield: {err}");
+                                }
                             }
                         }
                     }
@@ -733,7 +739,10 @@ impl Tty {
                                         .set_hdr_state(surface.connector, Some(state))
                                     {
                                         warn!("error re-staging HDR on resume: {err:?}");
-                                        let _ = device.drm.destroy_property_blob(blob_id);
+                                        if let Err(err) = device.drm.destroy_property_blob(blob_id)
+                                        {
+                                            warn!("failed to free HDR blob after stage error: {err}");
+                                        }
                                     } else {
                                         if let Some(old) = std::mem::replace(
                                             &mut surface.hdr_metadata_blob_id,
@@ -1455,7 +1464,9 @@ impl Tty {
                         }
                         Err(err) => {
                             warn!("error staging HDR state: {err:?}");
-                            let _ = device.drm.destroy_property_blob(blob_id);
+                            if let Err(err) = device.drm.destroy_property_blob(blob_id) {
+                                warn!("failed to free HDR blob after stage error: {err}");
+                            }
                         }
                     }
                 }
