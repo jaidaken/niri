@@ -688,7 +688,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 } + self.options.layout.gaps * 2.;
 
                 // If it fits together, do a normal animation, otherwise center the new column.
-                if total_width <= self.working_area.size.w {
+                if total_width <= self.options.scroll_axis.main_size(self.working_area.size) {
                     self.compute_new_view_offset_for_column_fit(target_x, idx)
                 } else {
                     self.compute_new_view_offset_for_column_centered(target_x, idx)
@@ -2266,9 +2266,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         }
 
         // Consider the end of an ongoing animation because that's what compute to fit does too.
+        let axis = self.options.scroll_axis;
         let view_x = self.target_view_pos();
-        let working_x = self.working_area.loc.x;
-        let working_w = self.working_area.size.w;
+        let working_x = axis.main(self.working_area.loc);
+        let working_w = axis.main_size(self.working_area.size);
 
         // Count all columns that are fully visible inside the working area.
         let mut width_taken = 0.;
@@ -2775,9 +2776,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         // (they have a different area and padding).
 
         // Consider the end of an ongoing animation because that's what compute to fit does too.
+        let axis = self.options.scroll_axis;
         let view_x = self.target_view_pos();
-        let working_x = self.working_area.loc.x;
-        let working_w = self.working_area.size.w;
+        let working_x = axis.main(self.working_area.loc);
+        let working_w = axis.main_size(self.working_area.size);
 
         // Count all columns that are fully visible inside the working area.
         let mut width_taken = 0.;
