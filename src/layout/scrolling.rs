@@ -5172,18 +5172,22 @@ impl<W: LayoutElement> Column<W> {
     }
 
     fn tiles_origin(&self) -> Point<f64, Logical> {
+        let axis = self.options.scroll_axis;
         let mut origin = Point::from((0., 0.));
 
         match self.sizing_mode() {
             SizingMode::Normal => (),
             SizingMode::Maximized => {
-                origin.y += self.parent_area.loc.y;
+                origin = axis.add_cross(origin, axis.cross(self.parent_area.loc));
                 return origin;
             }
             SizingMode::Fullscreen => return origin,
         }
 
-        origin.y += self.working_area.loc.y + self.options.layout.gaps;
+        origin = axis.add_cross(
+            origin,
+            axis.cross(self.working_area.loc) + self.options.layout.gaps,
+        );
 
         if self.display_mode == ColumnDisplay::Tabbed {
             origin += self
@@ -5203,15 +5207,16 @@ impl<W: LayoutElement> Column<W> {
         // FIXME: this should take into account always-center-single-column, which means that
         // Column should somehow know when it is being centered due to being the single column on
         // the workspace or some other reason.
+        let axis = self.options.scroll_axis;
         let center = self.options.layout.center_focused_column == CenterFocusedColumn::Always;
         let gaps = self.options.layout.gaps;
         let tabbed = self.display_mode == ColumnDisplay::Tabbed;
 
-        // Does not include extra size from the tab indicator.
-        let tiles_width = self
+        // Does not include extra size from the tab indicator. Max extent along the main axis.
+        let tiles_main = self
             .data
             .iter()
-            .map(|data| NotNan::new(data.size.w).unwrap())
+            .map(|data| NotNan::new(axis.main_size(data.size)).unwrap())
             .max()
             .map(NotNan::into_inner)
             .unwrap_or(0.);
@@ -5230,13 +5235,13 @@ impl<W: LayoutElement> Column<W> {
             let mut pos = origin;
 
             if center {
-                pos.x += (tiles_width - data.size.w) / 2.;
+                pos = axis.add_main(pos, (tiles_main - axis.main_size(data.size)) / 2.);
             } else if data.interactively_resizing_by_left_edge {
-                pos.x += tiles_width - data.size.w;
+                pos = axis.add_main(pos, tiles_main - axis.main_size(data.size));
             }
 
             if !tabbed {
-                origin.y += data.size.h + gaps;
+                origin = axis.add_cross(origin, axis.cross_size(data.size) + gaps);
             }
 
             pos

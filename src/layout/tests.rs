@@ -3969,3 +3969,45 @@ fn vertical_columns_separate_along_y() {
     assert_ne!(pos[0].y, pos[1].y, "vertical: columns separate along Y");
     assert_eq!(pos[0].x, pos[1].x, "vertical: columns share the X baseline");
 }
+
+fn two_tile_column_positions(scroll_axis: ScrollAxis) -> Vec<Point<f64, Logical>> {
+    let options = Options {
+        scroll_axis,
+        ..Default::default()
+    };
+    let ops = [
+        Op::AddOutput(1),
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        // Focus the left column, then pull the right window into it: one column, two tiles.
+        Op::FocusColumnLeft,
+        Op::ConsumeWindowIntoColumn,
+        Op::AdvanceAnimations { msec_delta: 1000 },
+    ];
+    let layout = check_ops_with_options(options, ops);
+    let scrolling = layout.active_workspace().unwrap().scrolling();
+    scrolling
+        .tiles_with_render_positions()
+        .map(|(_, pos, _)| pos)
+        .collect()
+}
+
+#[test]
+fn horizontal_tiles_stack_along_y() {
+    let pos = two_tile_column_positions(ScrollAxis::Horizontal);
+    assert_eq!(pos.len(), 2, "two tiles in one column");
+    assert_ne!(pos[0].y, pos[1].y, "horizontal: tiles stack along Y");
+    assert_eq!(pos[0].x, pos[1].x, "horizontal: tiles share the X baseline");
+}
+
+#[test]
+fn vertical_tiles_stack_along_x() {
+    let pos = two_tile_column_positions(ScrollAxis::Vertical);
+    assert_eq!(pos.len(), 2, "two tiles in one column");
+    assert_ne!(pos[0].x, pos[1].x, "vertical: tiles stack along X");
+    assert_eq!(pos[0].y, pos[1].y, "vertical: tiles share the Y baseline");
+}
