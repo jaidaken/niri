@@ -401,6 +401,10 @@ fn arbitrary_scroll_direction() -> impl Strategy<Value = ScrollDirection> {
     prop_oneof![Just(ScrollDirection::Left), Just(ScrollDirection::Right)]
 }
 
+fn arbitrary_scroll_axis() -> impl Strategy<Value = ScrollAxis> {
+    prop_oneof![Just(ScrollAxis::Horizontal), Just(ScrollAxis::Vertical)]
+}
+
 fn arbitrary_column_display() -> impl Strategy<Value = ColumnDisplay> {
     prop_oneof![Just(ColumnDisplay::Normal), Just(ColumnDisplay::Tabbed)]
 }
@@ -3920,10 +3924,12 @@ proptest! {
     fn random_operations_dont_panic(
         ops: Vec<Op>,
         layout_config in arbitrary_layout_part(),
+        scroll_axis in arbitrary_scroll_axis(),
     ) {
         // eprintln!("{ops:?}");
         let options = Options {
             layout: niri_config::Layout::from_part(&layout_config),
+            scroll_axis,
             ..Default::default()
         };
 
