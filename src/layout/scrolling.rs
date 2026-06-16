@@ -575,11 +575,18 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
         let target_x = target_x.unwrap_or_else(|| self.target_view_pos());
 
-        let new_offset =
-            compute_new_view_offset(target_x + area.loc.x, area.size.w, col_x, width, padding);
+        let axis = self.options.scroll_axis;
+        let area_loc_main = axis.main(area.loc);
+        let new_offset = compute_new_view_offset(
+            target_x + area_loc_main,
+            axis.main_size(area.size),
+            col_x,
+            width,
+            padding,
+        );
 
         // Non-fullscreen windows are always offset at least by the working area position.
-        new_offset - area.loc.x
+        new_offset - area_loc_main
     }
 
     fn compute_new_view_offset_centered(
@@ -599,12 +606,14 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             self.working_area
         };
 
+        let axis = self.options.scroll_axis;
+
         // Columns wider than the view are left-aligned (the fit code can deal with that).
-        if area.size.w <= width {
+        if axis.main_size(area.size) <= width {
             return self.compute_new_view_offset_fit(target_x, col_x, width, mode);
         }
 
-        -(area.size.w - width) / 2. - area.loc.x
+        -(axis.main_size(area.size) - width) / 2. - axis.main(area.loc)
     }
 
     fn compute_new_view_offset_for_column_fit(&self, target_x: Option<f64>, idx: usize) -> f64 {
