@@ -12,6 +12,7 @@ use smithay::output::{Mode, PhysicalProperties, Subpixel};
 use smithay::utils::Rectangle;
 
 use super::*;
+use crate::utils::scroll_axis::ScrollAxis;
 
 mod animations;
 mod fullscreen;
@@ -3928,4 +3929,43 @@ proptest! {
 
         check_ops_with_options(options, ops);
     }
+}
+
+fn two_column_positions(scroll_axis: ScrollAxis) -> Vec<Point<f64, Logical>> {
+    let options = Options {
+        scroll_axis,
+        ..Default::default()
+    };
+    let ops = [
+        Op::AddOutput(1),
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        Op::AdvanceAnimations { msec_delta: 1000 },
+    ];
+    let layout = check_ops_with_options(options, ops);
+    let scrolling = layout.active_workspace().unwrap().scrolling();
+    scrolling
+        .tiles_with_render_positions()
+        .map(|(_, pos, _)| pos)
+        .collect()
+}
+
+#[test]
+fn horizontal_columns_separate_along_x() {
+    let pos = two_column_positions(ScrollAxis::Horizontal);
+    assert_eq!(pos.len(), 2, "two windows form two columns");
+    assert_ne!(pos[0].x, pos[1].x, "horizontal: columns separate along X");
+    assert_eq!(pos[0].y, pos[1].y, "horizontal: columns share the Y baseline");
+}
+
+#[test]
+fn vertical_columns_separate_along_y() {
+    let pos = two_column_positions(ScrollAxis::Vertical);
+    assert_eq!(pos.len(), 2, "two windows form two columns");
+    assert_ne!(pos[0].y, pos[1].y, "vertical: columns separate along Y");
+    assert_eq!(pos[0].x, pos[1].x, "vertical: columns share the X baseline");
 }
