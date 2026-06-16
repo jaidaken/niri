@@ -19,7 +19,6 @@ use super::{ConfigureIntent, HitType, InteractiveResizeData, LayoutElement, Opti
 use crate::animation::{Animation, Clock};
 use crate::input::swipe_tracker::SwipeTracker;
 use crate::layout::SizingMode;
-use crate::utils::scroll_axis::ScrollAxis;
 use crate::niri_render_elements;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::xray::XrayPos;
@@ -93,9 +92,6 @@ pub struct ScrollingSpace<W: LayoutElement> {
 
     /// Configurable properties of the layout.
     options: Rc<Options>,
-
-    /// Orientation: which screen axis columns scroll along. Default horizontal.
-    scroll_axis: ScrollAxis,
 }
 
 niri_render_elements! {
@@ -311,7 +307,6 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             scale,
             clock,
             options,
-            scroll_axis: ScrollAxis::Horizontal,
         }
     }
 
@@ -402,7 +397,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
     }
 
     pub fn update_render_elements(&mut self, is_active: bool) {
-        let scroll_axis = self.scroll_axis;
+        let scroll_axis = self.options.scroll_axis;
         let view_pos = scroll_axis.point(self.view_pos(), 0.);
         let view_size = self.view_size;
         let active_idx = self.active_column_idx;
@@ -2384,7 +2379,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         &self,
     ) -> impl Iterator<Item = (&Tile<W>, Point<f64, Logical>, bool)> {
         let scale = self.scale;
-        let scroll_axis = self.scroll_axis;
+        let scroll_axis = self.options.scroll_axis;
         let view_off = scroll_axis.point(-self.view_pos(), 0.);
         self.columns_in_render_order()
             .flat_map(move |(col, col_x)| {
@@ -2406,7 +2401,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         round: bool,
     ) -> impl Iterator<Item = (&mut Tile<W>, Point<f64, Logical>)> {
         let scale = self.scale;
-        let scroll_axis = self.scroll_axis;
+        let scroll_axis = self.options.scroll_axis;
         let view_off = scroll_axis.point(-self.view_pos(), 0.);
         self.columns_in_render_order_mut()
             .flat_map(move |(col, col_x)| {
@@ -2555,7 +2550,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         let col = self.columns.get(self.active_column_idx)?;
 
         let final_view_offset = self.view_offset.target();
-        let view_off = self.scroll_axis.point(-final_view_offset, 0.);
+        let view_off = self.options.scroll_axis.point(-final_view_offset, 0.);
 
         let (tile, tile_off) = col.tiles().nth(col.active_tile_idx).unwrap();
 
@@ -2914,7 +2909,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         push: &mut dyn FnMut(ScrollingSpaceRenderElement<R>),
     ) {
         let scale = Scale::from(self.scale);
-        let scroll_axis = self.scroll_axis;
+        let scroll_axis = self.options.scroll_axis;
 
         // Draw the closing windows on top of the other windows.
         let view_rect = Rectangle::new(scroll_axis.point(self.view_pos(), 0.), self.view_size);
@@ -2976,7 +2971,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
     pub fn window_under(&self, pos: Point<f64, Logical>) -> Option<(&W, HitType)> {
         // This matches self.tiles_with_render_positions().
         let scale = self.scale;
-        let scroll_axis = self.scroll_axis;
+        let scroll_axis = self.options.scroll_axis;
         let view_off = scroll_axis.point(-self.view_pos(), 0.);
         for (col, col_x) in self.columns_in_render_order() {
             let col_off = scroll_axis.point(col_x, 0.);

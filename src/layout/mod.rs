@@ -68,6 +68,7 @@ use crate::render_helpers::texture::TextureBuffer;
 use crate::render_helpers::xray::{Xray, XrayPos};
 use crate::render_helpers::{BakedBuffer, RenderCtx};
 use crate::rubber_band::RubberBand;
+use crate::utils::scroll_axis::ScrollAxis;
 use crate::utils::transaction::{Transaction, TransactionBlocker};
 use crate::utils::{
     ensure_min_max_size_maybe_zero, output_matches_name, output_size,
@@ -389,6 +390,10 @@ enum MonitorSet<W: LayoutElement> {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Options {
     pub layout: niri_config::Layout,
+
+    /// Scroll orientation. Currently always horizontal; will derive from `layout`
+    /// (recompute on per-output merge).
+    pub scroll_axis: ScrollAxis,
     pub animations: niri_config::Animations,
     pub gestures: niri_config::Gestures,
     pub overview: niri_config::Overview,
@@ -657,6 +662,7 @@ impl Options {
             disable_resize_throttling: config.debug.disable_resize_throttling,
             disable_transactions: config.debug.disable_transactions,
             deactivate_unfocused_windows: config.debug.deactivate_unfocused_windows,
+            scroll_axis: ScrollAxis::default(),
         }
     }
 
