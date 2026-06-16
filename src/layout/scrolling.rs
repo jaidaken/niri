@@ -497,10 +497,18 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             Size::from((0., 0.))
         };
 
+        let axis = self.options.scroll_axis;
         let working_size = self.working_area.size;
 
+        // `width` is the extent along the main (scroll) axis; `height`/`full_height`
+        // the extent along the cross (stacking) axis.
         let width = if let Some(size) = width {
-            let size = match resolve_preset_size(size, &self.options, working_size.w, extra.w) {
+            let size = match resolve_preset_size(
+                size,
+                &self.options,
+                axis.main_size(working_size),
+                axis.main_size(extra),
+            ) {
                 ResolvedSize::Tile(mut size) => {
                     if !border.off {
                         size -= border.width * 2.;
@@ -515,13 +523,18 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             0
         };
 
-        let mut full_height = self.working_area.size.h - self.options.layout.gaps * 2.;
+        let mut full_height = axis.cross_size(self.working_area.size) - self.options.layout.gaps * 2.;
         if !border.off {
             full_height -= border.width * 2.;
         }
 
         let height = if let Some(height) = height {
-            let height = match resolve_preset_size(height, &self.options, working_size.h, extra.h) {
+            let height = match resolve_preset_size(
+                height,
+                &self.options,
+                axis.cross_size(working_size),
+                axis.cross_size(extra),
+            ) {
                 ResolvedSize::Tile(mut size) => {
                     if !border.off {
                         size -= border.width * 2.;
@@ -535,7 +548,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             full_height
         };
 
-        Size::from((width, max(height.floor() as i32, 1)))
+        axis.size(width, max(height.floor() as i32, 1))
     }
 
     pub fn is_centering_focused_column(&self) -> bool {
@@ -4394,23 +4407,36 @@ impl<W: LayoutElement> Column<W> {
     }
 
     fn resolve_preset_width(&self, preset: PresetSize) -> ResolvedSize {
+        let axis = self.options.scroll_axis;
         let extra = self.extra_size();
-        resolve_preset_size(preset, &self.options, self.working_area.size.w, extra.w)
+        resolve_preset_size(
+            preset,
+            &self.options,
+            axis.main_size(self.working_area.size),
+            axis.main_size(extra),
+        )
     }
 
     fn resolve_preset_height(&self, preset: PresetSize) -> ResolvedSize {
+        let axis = self.options.scroll_axis;
         let extra = self.extra_size();
-        resolve_preset_size(preset, &self.options, self.working_area.size.h, extra.h)
+        resolve_preset_size(
+            preset,
+            &self.options,
+            axis.cross_size(self.working_area.size),
+            axis.cross_size(extra),
+        )
     }
 
     fn resolve_column_width(&self, width: ColumnWidth) -> f64 {
+        let axis = self.options.scroll_axis;
         let working_size = self.working_area.size;
         let gaps = self.options.layout.gaps;
         let extra = self.extra_size();
 
         match width {
             ColumnWidth::Proportion(proportion) => {
-                (working_size.w - gaps) * proportion - gaps - extra.w
+                (axis.main_size(working_size) - gaps) * proportion - gaps - axis.main_size(extra)
             }
             ColumnWidth::Fixed(width) => width,
         }
@@ -4442,6 +4468,7 @@ impl<W: LayoutElement> Column<W> {
         }
 
         let is_tabbed = self.display_mode == ColumnDisplay::Tabbed;
+        let axis = self.options.scroll_axis;
 
         let min_size: Vec<_> = self
             .tiles
@@ -4459,17 +4486,17 @@ impl<W: LayoutElement> Column<W> {
             .map(Tile::max_size_nonfullscreen)
             .collect();
 
-        // Compute the column width.
+        // Compute the column extent along the main (scroll) axis.
         let min_width = min_size
             .iter()
-            .map(|size| NotNan::new(size.w).unwrap())
+            .map(|size| NotNan::new(axis.main_size(*size)).unwrap())
             .max()
             .map(NotNan::into_inner)
             .unwrap();
         let max_width = max_size
             .iter()
             .filter_map(|size| {
-                let w = size.w;
+                let w = axis.main_size(*size);
                 if w == 0. {
                     None
                 } else {
@@ -4492,7 +4519,9 @@ impl<W: LayoutElement> Column<W> {
 
         let width = self.resolve_column_width(width);
         let width = f64::max(f64::min(width, max_width), min_width);
-        let max_tile_height = working_size.h - self.options.layout.gaps * 2. - extra_size.h;
+        let max_tile_height = axis.cross_size(working_size)
+            - self.options.layout.gaps * 2.
+            - axis.cross_size(extra_size);
 
         // If there are multiple windows in a column, clamp the non-auto window's height according
         // to other windows' min sizes.
@@ -4507,7 +4536,7 @@ impl<W: LayoutElement> Column<W> {
                     .iter()
                     .enumerate()
                     .filter(|(idx, _)| *idx != non_auto_idx)
-                    .map(|(_, min_size)| min_size.h + self.options.layout.gaps)
+                    .map(|(_, min_size)| axis.cross_size(*min_size) + self.options.layout.gaps)
                     .sum::<f64>();
 
                 let tile = &self.tiles[non_auto_idx];
@@ -4570,7 +4599,7 @@ impl<W: LayoutElement> Column<W> {
             // We also take min height of all tabs into account.
             let min_height = min_size
                 .iter()
-                .map(|size| NotNan::new(size.h).unwrap())
+                .map(|size| NotNan::new(axis.cross_size(*size)).unwrap())
                 .max()
                 .map(NotNan::into_inner)
                 .unwrap();
@@ -4585,21 +4614,21 @@ impl<W: LayoutElement> Column<W> {
         }
 
         let gaps_left = self.options.layout.gaps * (self.tiles.len() + 1) as f64;
-        let mut height_left = working_size.h - gaps_left;
+        let mut height_left = axis.cross_size(working_size) - gaps_left;
         let mut auto_tiles_left = self.tiles.len();
 
         // Subtract all fixed-height tiles.
         for (h, (min_size, max_size)) in zip(&mut heights, zip(&min_size, &max_size)) {
-            // Check if the tile has an exact height constraint.
-            if min_size.h == max_size.h {
-                *h = WindowHeight::Fixed(min_size.h);
+            // Check if the tile has an exact cross-axis constraint.
+            if axis.cross_size(*min_size) == axis.cross_size(*max_size) {
+                *h = WindowHeight::Fixed(axis.cross_size(*min_size));
             }
 
             if let WindowHeight::Fixed(h) = h {
-                if max_size.h > 0. {
-                    *h = f64::min(*h, max_size.h);
+                if axis.cross_size(*max_size) > 0. {
+                    *h = f64::min(*h, axis.cross_size(*max_size));
                 }
-                *h = f64::max(*h, min_size.h);
+                *h = f64::max(*h, axis.cross_size(*min_size));
 
                 height_left -= *h;
                 auto_tiles_left -= 1;
@@ -4644,9 +4673,9 @@ impl<W: LayoutElement> Column<W> {
                 // Compute the current auto height.
                 let mut auto = height_left_2 * factor;
 
-                // Check if the auto height satisfies the min height.
-                if min_size.h > auto {
-                    auto = min_size.h;
+                // Check if the auto height satisfies the min cross-axis size.
+                if axis.cross_size(*min_size) > auto {
+                    auto = axis.cross_size(*min_size);
                     *h = WindowHeight::Fixed(auto);
                     height_left -= auto;
                     total_weight -= weight;
@@ -4700,7 +4729,7 @@ impl<W: LayoutElement> Column<W> {
                 unreachable!()
             };
 
-            let size = Size::from((width, height));
+            let size = axis.size(width, height);
 
             // In tabbed mode, only the visible window participates in the transaction.
             let is_active = tile_idx == self.active_tile_idx;
@@ -4715,17 +4744,18 @@ impl<W: LayoutElement> Column<W> {
     }
 
     fn width(&self) -> f64 {
+        let axis = self.options.scroll_axis;
         let mut tiles_width = self
             .data
             .iter()
-            .map(|data| NotNan::new(data.size.w).unwrap())
+            .map(|data| NotNan::new(axis.main_size(data.size)).unwrap())
             .max()
             .map(NotNan::into_inner)
             .unwrap();
 
         if self.display_mode == ColumnDisplay::Tabbed && self.sizing_mode().is_normal() {
             let extra_size = self.tab_indicator.extra_size(self.tiles.len(), self.scale);
-            tiles_width += extra_size.w;
+            tiles_width += axis.main_size(extra_size);
         }
 
         tiles_width

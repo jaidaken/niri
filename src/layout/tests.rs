@@ -4017,3 +4017,43 @@ fn vertical_tiles_stack_along_x() {
     assert_ne!(pos[0].x, pos[1].x, "vertical: tiles stack along X");
     assert_eq!(pos[0].y, pos[1].y, "vertical: tiles share the Y baseline");
 }
+
+fn single_tile_size(scroll_axis: ScrollAxis) -> Size<f64, Logical> {
+    let options = Options {
+        layout: niri_config::Layout {
+            default_column_width: Some(niri_config::PresetSize::Proportion(0.5)),
+            ..Default::default()
+        },
+        scroll_axis,
+        ..Default::default()
+    };
+    let ops = [
+        Op::AddOutput(1),
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        // Ack the configure so the window adopts the column slot size.
+        Op::Communicate(1),
+        Op::AdvanceAnimations { msec_delta: 1000 },
+    ];
+    let layout = check_ops_with_options(options, ops);
+    let size = layout
+        .active_workspace()
+        .unwrap()
+        .scrolling()
+        .tiles()
+        .next()
+        .unwrap()
+        .tile_size();
+    size
+}
+
+#[test]
+fn vertical_window_spans_full_width() {
+    // Column width is a proportion of the MAIN axis: screen width when horizontal
+    // (part-width window), screen height when vertical (so the window is full-width).
+    let h = single_tile_size(ScrollAxis::Horizontal);
+    let v = single_tile_size(ScrollAxis::Vertical);
+    assert!(v.w > h.w, "vertical spans the cross width: h={h:?} v={v:?}");
+    assert!(v.h < h.h, "vertical shorter on the main axis: h={h:?} v={v:?}");
+}
