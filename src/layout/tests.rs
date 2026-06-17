@@ -1531,7 +1531,8 @@ impl Op {
                 timestamp,
                 is_touchpad,
             } => {
-                layout.view_offset_gesture_update(delta, timestamp, is_touchpad);
+                let p: Point<f64, Logical> = layout.active_scroll_axis().point(delta, 0.);
+                layout.view_offset_gesture_update(p.x, p.y, timestamp, is_touchpad);
             }
             Op::ViewOffsetGestureEnd { is_touchpad } => {
                 layout.view_offset_gesture_end(is_touchpad);
@@ -1552,7 +1553,9 @@ impl Op {
                 timestamp,
                 is_touchpad,
             } => {
-                layout.workspace_switch_gesture_update(delta, timestamp, is_touchpad);
+                let perp = layout.active_scroll_axis().perpendicular();
+                let p: Point<f64, Logical> = perp.point(delta, 0.);
+                layout.workspace_switch_gesture_update(p.x, p.y, timestamp, is_touchpad);
             }
             Op::WorkspaceSwitchGestureEnd { is_touchpad } => {
                 layout.workspace_switch_gesture_end(is_touchpad);

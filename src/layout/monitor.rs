@@ -27,6 +27,7 @@ use crate::render_helpers::solid_color::SolidColorRenderElement;
 use crate::render_helpers::xray::XrayPos;
 use crate::render_helpers::RenderCtx;
 use crate::rubber_band::RubberBand;
+use crate::utils::scroll_axis::ScrollAxis;
 use crate::utils::transaction::Transaction;
 use crate::utils::{
     output_size, round_logical_in_physical, round_logical_in_physical_max1, ResizeEdge,
@@ -1792,6 +1793,10 @@ impl<W: LayoutElement> Monitor<W> {
         }
     }
 
+    pub fn scroll_axis(&self) -> ScrollAxis {
+        self.options.scroll_axis
+    }
+
     pub fn workspace_switch_gesture_begin(&mut self, is_touchpad: bool) {
         let center_idx = self.active_workspace_idx;
         let current_idx = self.workspace_render_idx();
@@ -1844,6 +1849,7 @@ impl<W: LayoutElement> Monitor<W> {
 
     pub fn workspace_switch_gesture_update(
         &mut self,
+        delta_x: f64,
         delta_y: f64,
         timestamp: Duration,
         is_touchpad: bool,
@@ -1855,6 +1861,13 @@ impl<W: LayoutElement> Monitor<W> {
         if gesture.is_touchpad != is_touchpad || gesture.dnd_last_event_time.is_some() {
             return None;
         }
+
+        // Workspaces switch along the axis perpendicular to scrolling; pick that screen component.
+        let delta_y = self
+            .options
+            .scroll_axis
+            .perpendicular()
+            .main(Point::<f64, Logical>::from((delta_x, delta_y)));
 
         let zoom = self.overview_zoom();
         let total_height = if gesture.is_touchpad {

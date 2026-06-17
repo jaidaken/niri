@@ -3155,9 +3155,16 @@ impl<W: LayoutElement> ScrollingSpace<W> {
     pub fn view_offset_gesture_update(
         &mut self,
         delta_x: f64,
+        delta_y: f64,
         timestamp: Duration,
         is_touchpad: bool,
     ) -> Option<bool> {
+        // The view scrolls along the main axis; pick that screen component.
+        let delta = self
+            .options
+            .scroll_axis
+            .main(Point::<f64, Logical>::from((delta_x, delta_y)));
+
         let ViewOffset::Gesture(gesture) = &mut self.view_offset else {
             return None;
         };
@@ -3166,7 +3173,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             return None;
         }
 
-        gesture.tracker.push(delta_x, timestamp);
+        gesture.tracker.push(delta, timestamp);
 
         let norm_factor = if gesture.is_touchpad {
             self.options.scroll_axis.main_size(self.working_area.size)

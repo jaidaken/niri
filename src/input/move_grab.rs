@@ -19,6 +19,7 @@ use smithay::utils::{IsAlive, Logical, Point, Serial, SERIAL_COUNTER};
 use crate::input::PointerOrTouchStartData;
 use crate::niri::State;
 use crate::utils::get_monotonic_time;
+use crate::utils::scroll_axis::ScrollAxis;
 
 pub struct MoveGrab {
     start_data: PointerOrTouchStartData<State>,
@@ -199,8 +200,12 @@ impl MoveGrab {
                     })
                     .unwrap_or(false);
 
-                let is_view_offset =
-                    self.enable_view_offset && !is_floating && c.x.abs() > c.y.abs();
+                let along_scroll = match data.niri.layout.scroll_axis_for_output(&self.start_output)
+                {
+                    ScrollAxis::Horizontal => c.x.abs() > c.y.abs(),
+                    ScrollAxis::Vertical => c.y.abs() > c.x.abs(),
+                };
+                let is_view_offset = self.enable_view_offset && !is_floating && along_scroll;
 
                 let started = if is_view_offset {
                     self.begin_view_offset(data)
@@ -243,6 +248,7 @@ impl MoveGrab {
             GestureState::ViewOffset => {
                 let res = data.niri.layout.view_offset_gesture_update(
                     -relative_delta.x,
+                    -relative_delta.y,
                     timestamp,
                     false,
                 );

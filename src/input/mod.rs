@@ -48,6 +48,7 @@ use self::spatial_movement_grab::SpatialMovementGrab;
 use crate::dbus::freedesktop_a11y::KbMonBlock;
 use crate::layout::scrolling::ScrollDirection;
 use crate::layout::{ActivateWindow, LayoutElement as _};
+use crate::utils::scroll_axis::ScrollAxis;
 use crate::niri::{CastTarget, PointerVisibility, State};
 use crate::ui::mru::{WindowMru, WindowMruUi};
 use crate::ui::screenshot_ui::ScreenshotUi;
@@ -3301,6 +3302,11 @@ impl State {
             let horizontal = horizontal_amount.unwrap_or(0.);
             let vertical = vertical_amount.unwrap_or(0.);
 
+            let overview_axis = match self.niri.output_under_cursor() {
+                Some(output) => self.niri.layout.scroll_axis_for_output(&output),
+                None => ScrollAxis::default(),
+            };
+
             if should_handle_in_overview && modifiers.is_empty() {
                 let mut redraw = false;
 
@@ -3309,9 +3315,14 @@ impl State {
                     .overview_scroll_swipe_gesture
                     .update(horizontal, vertical);
                 let is_vertical = self.niri.overview_scroll_swipe_gesture.is_vertical();
+                // Workspaces switch along the axis perpendicular to scrolling.
+                let is_workspace_switch = match overview_axis {
+                    ScrollAxis::Horizontal => is_vertical,
+                    ScrollAxis::Vertical => !is_vertical,
+                };
 
                 if action.end() {
-                    if is_vertical {
+                    if is_workspace_switch {
                         redraw |= self
                             .niri
                             .layout
@@ -3326,7 +3337,7 @@ impl State {
                     }
                 } else {
                     // Maybe begin, then update.
-                    if is_vertical {
+                    if is_workspace_switch {
                         if action.begin() {
                             if let Some(output) = self.niri.output_under_cursor() {
                                 self.niri
@@ -3336,10 +3347,12 @@ impl State {
                             }
                         }
 
-                        let res = self
-                            .niri
-                            .layout
-                            .workspace_switch_gesture_update(vertical, timestamp, true);
+                        let res = self.niri.layout.workspace_switch_gesture_update(
+                            horizontal,
+                            vertical,
+                            timestamp,
+                            true,
+                        );
                         if let Some(Some(_)) = res {
                             redraw = true;
                         }
@@ -3359,10 +3372,12 @@ impl State {
                             }
                         }
 
-                        let res = self
-                            .niri
-                            .layout
-                            .view_offset_gesture_update(horizontal, timestamp, true);
+                        let res = self.niri.layout.view_offset_gesture_update(
+                            horizontal,
+                            vertical,
+                            timestamp,
+                            true,
+                        );
                         if let Some(Some(_)) = res {
                             redraw = true;
                         }
@@ -3377,7 +3392,12 @@ impl State {
             } else {
                 let mut redraw = false;
                 if self.niri.overview_scroll_swipe_gesture.reset() {
-                    if self.niri.overview_scroll_swipe_gesture.is_vertical() {
+                    let is_vertical = self.niri.overview_scroll_swipe_gesture.is_vertical();
+                    let is_workspace_switch = match overview_axis {
+                        ScrollAxis::Horizontal => is_vertical,
+                        ScrollAxis::Vertical => !is_vertical,
+                    };
+                    if is_workspace_switch {
                         redraw |= self
                             .niri
                             .layout
@@ -3906,7 +3926,11 @@ impl State {
                 self.niri.gesture_swipe_3f_cumulative = None;
 
                 if let Some(output) = self.niri.output_under_cursor() {
-                    if cx.abs() > cy.abs() {
+                    let along_scroll = match self.niri.layout.scroll_axis_for_output(&output) {
+                        ScrollAxis::Horizontal => cx.abs() > cy.abs(),
+                        ScrollAxis::Vertical => cy.abs() > cx.abs(),
+                    };
+                    if along_scroll {
                         let output_ws = if is_overview_open {
                             self.niri.workspace_under_cursor(true)
                         } else {
@@ -3939,7 +3963,7 @@ impl State {
         let res = self
             .niri
             .layout
-            .workspace_switch_gesture_update(delta_y, timestamp, true);
+            .workspace_switch_gesture_update(delta_x, delta_y, timestamp, true);
         if let Some(output) = res {
             if let Some(output) = output {
                 self.niri.queue_redraw(&output);
@@ -3950,7 +3974,7 @@ impl State {
         let res = self
             .niri
             .layout
-            .view_offset_gesture_update(delta_x, timestamp, true);
+            .view_offset_gesture_update(delta_x, delta_y, timestamp, true);
         if let Some(output) = res {
             if let Some(output) = output {
                 self.niri.queue_redraw(&output);

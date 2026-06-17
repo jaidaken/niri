@@ -13,6 +13,7 @@ use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 use crate::layout::workspace::WorkspaceId;
 use crate::niri::State;
 use crate::utils::get_monotonic_time;
+use crate::utils::scroll_axis::ScrollAxis;
 
 pub struct SpatialMovementGrab {
     start_data: PointerGrabStartData<State>,
@@ -86,12 +87,16 @@ impl SpatialMovementGrab {
 
                 // Check if the gesture moved far enough to decide. Threshold copied from GTK 4.
                 if c.x * c.x + c.y * c.y >= 8. * 8. {
-                    if c.x.abs() > c.y.abs() {
+                    let along_scroll = match layout.scroll_axis_for_output(&self.output) {
+                        ScrollAxis::Horizontal => c.x.abs() > c.y.abs(),
+                        ScrollAxis::Vertical => c.y.abs() > c.x.abs(),
+                    };
+                    if along_scroll {
                         self.gesture = GestureState::ViewOffset;
                         if let Some((ws_idx, ws)) = layout.find_workspace_by_id(self.workspace_id) {
                             if ws.current_output() == Some(&self.output) {
                                 layout.view_offset_gesture_begin(&self.output, Some(ws_idx), false);
-                                layout.view_offset_gesture_update(-c.x, timestamp, false)
+                                layout.view_offset_gesture_update(-c.x, -c.y, timestamp, false)
                             } else {
                                 None
                             }
@@ -101,17 +106,17 @@ impl SpatialMovementGrab {
                     } else {
                         self.gesture = GestureState::WorkspaceSwitch;
                         layout.workspace_switch_gesture_begin(&self.output, false);
-                        layout.workspace_switch_gesture_update(-c.y, timestamp, false)
+                        layout.workspace_switch_gesture_update(-c.x, -c.y, timestamp, false)
                     }
                 } else {
                     Some(None)
                 }
             }
             GestureState::ViewOffset => {
-                layout.view_offset_gesture_update(-delta.x, timestamp, false)
+                layout.view_offset_gesture_update(-delta.x, -delta.y, timestamp, false)
             }
             GestureState::WorkspaceSwitch => {
-                layout.workspace_switch_gesture_update(-delta.y, timestamp, false)
+                layout.workspace_switch_gesture_update(-delta.x, -delta.y, timestamp, false)
             }
         };
 

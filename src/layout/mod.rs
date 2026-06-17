@@ -1781,6 +1781,16 @@ impl<W: LayoutElement> Layout<W> {
         self.monitors_mut().find(|mon| &mon.output == output)
     }
 
+    pub fn scroll_axis_for_output(&self, output: &Output) -> ScrollAxis {
+        self.monitor_for_output(output)
+            .map_or(ScrollAxis::default(), |mon| mon.scroll_axis())
+    }
+
+    pub fn active_scroll_axis(&self) -> ScrollAxis {
+        self.active_monitor_ref()
+            .map_or(ScrollAxis::default(), |mon| mon.scroll_axis())
+    }
+
     pub fn monitor_for_workspace(&self, workspace_name: &str) -> Option<&Monitor<W>> {
         self.monitors().find(|monitor| {
             monitor.workspaces.iter().any(|ws| {
@@ -3613,6 +3623,7 @@ impl<W: LayoutElement> Layout<W> {
 
     pub fn workspace_switch_gesture_update(
         &mut self,
+        delta_x: f64,
         delta_y: f64,
         timestamp: Duration,
         is_touchpad: bool,
@@ -3624,7 +3635,7 @@ impl<W: LayoutElement> Layout<W> {
 
         for monitor in monitors {
             if let Some(refresh) =
-                monitor.workspace_switch_gesture_update(delta_y, timestamp, is_touchpad)
+                monitor.workspace_switch_gesture_update(delta_x, delta_y, timestamp, is_touchpad)
             {
                 if refresh {
                     return Some(Some(monitor.output.clone()));
@@ -3681,11 +3692,13 @@ impl<W: LayoutElement> Layout<W> {
     pub fn view_offset_gesture_update(
         &mut self,
         delta_x: f64,
+        delta_y: f64,
         timestamp: Duration,
         is_touchpad: bool,
     ) -> Option<Option<Output>> {
         let zoom = self.overview_zoom();
         let delta_x = delta_x / zoom;
+        let delta_y = delta_y / zoom;
 
         let monitors = match &mut self.monitor_set {
             MonitorSet::Normal { monitors, .. } => monitors,
@@ -3695,7 +3708,7 @@ impl<W: LayoutElement> Layout<W> {
         for monitor in monitors {
             for ws in &mut monitor.workspaces {
                 if let Some(refresh) =
-                    ws.view_offset_gesture_update(delta_x, timestamp, is_touchpad)
+                    ws.view_offset_gesture_update(delta_x, delta_y, timestamp, is_touchpad)
                 {
                     if refresh {
                         return Some(Some(monitor.output.clone()));
