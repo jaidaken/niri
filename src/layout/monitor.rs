@@ -1450,12 +1450,14 @@ impl<W: LayoutElement> Monitor<W> {
                 // - first_y = (to - from) * from_height - from_height * (switch_anim.value() - from) - to * current_height
                 // - first_y = to * from_height - switch_anim.value() * from_height - to * current_height
                 // - first_y = -switch_anim.value() * from_height + to * (from_height - current_height)
+                let ws_axis = self.options.scroll_axis.perpendicular();
                 let from = progress_anim.from();
                 let from_zoom = compute_overview_zoom(&self.options, Some(from));
-                let from_ws_height_with_gap = self.workspace_size_with_gap(from_zoom).h;
+                let from_ws_height_with_gap =
+                    ws_axis.main_size(self.workspace_size_with_gap(from_zoom));
 
                 let zoom = self.overview_zoom();
-                let ws_height_with_gap = self.workspace_size_with_gap(zoom).h;
+                let ws_height_with_gap = ws_axis.main_size(self.workspace_size_with_gap(zoom));
 
                 let first_ws_y = -switch_anim.value() * from_ws_height_with_gap
                     + switch_anim.to() * (from_ws_height_with_gap - ws_height_with_gap);
@@ -1475,9 +1477,10 @@ impl<W: LayoutElement> Monitor<W> {
         let scale = self.scale.fractional_scale();
         let zoom = self.overview_zoom();
 
+        let ws_axis = self.options.scroll_axis.perpendicular();
         let ws_size = self.workspace_size(zoom);
         let gap = self.workspace_gap(zoom);
-        let ws_height_with_gap = ws_size.h + gap;
+        let ws_height_with_gap = ws_axis.main_size(ws_size) + gap;
 
         let static_offset = (self.view_size.to_point() - ws_size.to_point()).downscale(2.);
         let static_offset = static_offset
@@ -1490,7 +1493,7 @@ impl<W: LayoutElement> Monitor<W> {
         // Return position for one-past-last workspace too.
         (0..=self.workspaces.len()).map(move |idx| {
             let y = first_ws_y + idx as f64 * ws_height_with_gap;
-            let loc = Point::from((0., y)) + static_offset;
+            let loc = ws_axis.point(y, 0.) + static_offset;
 
             // Even though all components that go into loc are rounded to physical pixels, the
             // floating point addition may lose precision. This can result for example in the
@@ -1540,10 +1543,11 @@ impl<W: LayoutElement> Monitor<W> {
         &self,
         pos_within_output: Point<f64, Logical>,
     ) -> Option<(&Workspace<W>, Rectangle<f64, Logical>)> {
+        let ws_axis = self.options.scroll_axis.perpendicular();
         let (ws, geo) = self.workspaces_with_render_geo().find_map(|(ws, geo)| {
-            // Extend width to entire output.
-            let loc = Point::from((0., geo.loc.y));
-            let size = Size::from((self.view_size.w, geo.size.h));
+            // Extend the cross extent to the entire output.
+            let loc = ws_axis.point(ws_axis.main(geo.loc), 0.);
+            let size = ws_axis.size(ws_axis.main_size(geo.size), ws_axis.cross_size(self.view_size));
             let bounds = Rectangle::new(loc, size);
 
             bounds.contains(pos_within_output).then_some((ws, geo))
@@ -1588,6 +1592,7 @@ impl<W: LayoutElement> Monitor<W> {
         &self,
         pos_within_output: Point<f64, Logical>,
     ) -> (InsertWorkspace, Rectangle<f64, Logical>) {
+        let ws_axis = self.options.scroll_axis.perpendicular();
         let mut iter = self.workspaces_with_render_geo_idx();
 
         let dummy = Rectangle::default();
@@ -1595,13 +1600,15 @@ impl<W: LayoutElement> Monitor<W> {
         // Monitors always have at least one workspace.
         let ((idx, ws), geo) = iter.next().unwrap();
 
-        // Check if above first.
-        if pos_within_output.y < geo.loc.y {
+        // Check if before the first workspace along the switch axis.
+        if ws_axis.main(pos_within_output) < ws_axis.main(geo.loc) {
             return (InsertWorkspace::NewAt(idx), dummy);
         }
 
         let contains = move |geo: Rectangle<f64, Logical>| {
-            geo.loc.y <= pos_within_output.y && pos_within_output.y < geo.loc.y + geo.size.h
+            ws_axis.main(geo.loc) <= ws_axis.main(pos_within_output)
+                && ws_axis.main(pos_within_output)
+                    < ws_axis.main(geo.loc) + ws_axis.main_size(geo.size)
         };
 
         // Check first.
@@ -1613,8 +1620,14 @@ impl<W: LayoutElement> Monitor<W> {
         let mut last_idx = idx;
         for ((idx, ws), geo) in iter {
             // Check gap above.
-            let gap_loc = Point::from((last_geo.loc.x, last_geo.loc.y + last_geo.size.h));
-            let gap_size = Size::from((geo.size.w, geo.loc.y - gap_loc.y));
+            let gap_loc = ws_axis.point(
+                ws_axis.main(last_geo.loc) + ws_axis.main_size(last_geo.size),
+                ws_axis.cross(last_geo.loc),
+            );
+            let gap_size = ws_axis.size(
+                ws_axis.main(geo.loc) - ws_axis.main(gap_loc),
+                ws_axis.cross_size(geo.size),
+            );
             let gap_geo = Rectangle::new(gap_loc, gap_size);
             if contains(gap_geo) {
                 return (InsertWorkspace::NewAt(idx), dummy);
@@ -1847,7 +1860,10 @@ impl<W: LayoutElement> Monitor<W> {
         let total_height = if gesture.is_touchpad {
             WORKSPACE_GESTURE_MOVEMENT
         } else {
-            self.workspace_size_with_gap(1.).h
+            self.options
+                .scroll_axis
+                .perpendicular()
+                .main_size(self.workspace_size_with_gap(1.))
         };
 
         let Some(WorkspaceSwitch::Gesture(gesture)) = &mut self.workspace_switch else {
@@ -1981,7 +1997,10 @@ impl<W: LayoutElement> Monitor<W> {
         } else if gesture.is_touchpad {
             WORKSPACE_GESTURE_MOVEMENT
         } else {
-            self.workspace_size_with_gap(1.).h
+            self.options
+                .scroll_axis
+                .perpendicular()
+                .main_size(self.workspace_size_with_gap(1.))
         };
 
         let Some(WorkspaceSwitch::Gesture(gesture)) = &mut self.workspace_switch else {
