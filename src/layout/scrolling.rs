@@ -20,6 +20,7 @@ use crate::animation::{Animation, Clock};
 use crate::input::swipe_tracker::SwipeTracker;
 use crate::layout::SizingMode;
 use crate::niri_render_elements;
+use crate::utils::scroll_axis::ScrollAxis;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::xray::XrayPos;
 use crate::render_helpers::RenderCtx;
@@ -1372,14 +1373,18 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 // either preserve the view offset or adjust it accordingly.
                 let centered = self.is_centering_focused_column();
 
+                let axis = self.options.scroll_axis;
+                let main_leading = match axis {
+                    ScrollAxis::Horizontal => ResizeEdge::LEFT,
+                    ScrollAxis::Vertical => ResizeEdge::TOP,
+                };
                 let width = self.data[col_idx].width;
                 let offset = if centered {
                     // FIXME: when view_offset becomes fractional, this can be made additive too.
-                    let axis = self.options.scroll_axis;
                     let new_offset = -(axis.main_size(self.working_area.size) - width) / 2.
                         - axis.main(self.working_area.loc);
                     new_offset - self.view_offset.target()
-                } else if resize.edges.contains(ResizeEdge::LEFT) {
+                } else if resize.edges.contains(main_leading) {
                     -offset
                 } else {
                     0.
@@ -3627,6 +3632,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         }
 
         let is_centering = self.is_centering_focused_column();
+        let axis = self.options.scroll_axis;
 
         let col = self
             .columns
@@ -3640,33 +3646,47 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             .position(|tile| tile.window().id() == window)
             .unwrap();
 
-        if resize.data.edges.intersects(ResizeEdge::LEFT_RIGHT) {
-            let mut dx = delta.x;
-            if resize.data.edges.contains(ResizeEdge::LEFT) {
-                dx = -dx;
+        let (main_edges, main_leading, cross_edges, cross_leading) = match axis {
+            ScrollAxis::Horizontal => (
+                ResizeEdge::LEFT_RIGHT,
+                ResizeEdge::LEFT,
+                ResizeEdge::TOP_BOTTOM,
+                ResizeEdge::TOP,
+            ),
+            ScrollAxis::Vertical => (
+                ResizeEdge::TOP_BOTTOM,
+                ResizeEdge::TOP,
+                ResizeEdge::LEFT_RIGHT,
+                ResizeEdge::LEFT,
+            ),
+        };
+
+        // Dragging a main-axis edge resizes the column extent.
+        if resize.data.edges.intersects(main_edges) {
+            let mut d = axis.main(delta);
+            if resize.data.edges.contains(main_leading) {
+                d = -d;
             };
 
             if is_centering {
-                dx *= 2.;
+                d *= 2.;
             }
 
-            let window_width = (resize.original_window_size.w + dx).round() as i32;
+            let window_width = (axis.main_size(resize.original_window_size) + d).round() as i32;
             col.set_column_width(SizeChange::SetFixed(window_width), Some(tile_idx), false);
         }
 
-        if resize.data.edges.intersects(ResizeEdge::TOP_BOTTOM) {
-            // Prevent the simplest case of weird resizing (top edge when this is the topmost
+        // Dragging a cross-axis edge resizes the window within the column.
+        if resize.data.edges.intersects(cross_edges) {
+            // Prevent the simplest case of weird resizing (leading edge when this is the first
             // window).
-            if !(resize.data.edges.contains(ResizeEdge::TOP) && tile_idx == 0) {
-                let mut dy = delta.y;
-                if resize.data.edges.contains(ResizeEdge::TOP) {
-                    dy = -dy;
+            if !(resize.data.edges.contains(cross_leading) && tile_idx == 0) {
+                let mut d = axis.cross(delta);
+                if resize.data.edges.contains(cross_leading) {
+                    d = -d;
                 };
 
-                // FIXME: some smarter height distribution would be nice here so that vertical
-                // resizes work as expected in more cases.
-
-                let window_height = (resize.original_window_size.h + dy).round() as i32;
+                let window_height = (axis.cross_size(resize.original_window_size) + d).round() as i32;
                 col.set_window_height(SizeChange::SetFixed(window_height), Some(tile_idx), false);
             }
         }
@@ -3954,22 +3974,27 @@ impl ColumnData {
 }
 
 impl TileData {
-    pub fn new<W: LayoutElement>(tile: &Tile<W>, height: WindowHeight) -> Self {
+    pub fn new<W: LayoutElement>(tile: &Tile<W>, height: WindowHeight, axis: ScrollAxis) -> Self {
         let mut rv = Self {
             height,
             size: Size::default(),
             interactively_resizing_by_left_edge: false,
         };
-        rv.update(tile);
+        rv.update(tile, axis);
         rv
     }
 
-    pub fn update<W: LayoutElement>(&mut self, tile: &Tile<W>) {
+    pub fn update<W: LayoutElement>(&mut self, tile: &Tile<W>, axis: ScrollAxis) {
         self.size = tile.tile_size();
+        // True when the window's main-axis leading edge is being dragged.
+        let main_leading = match axis {
+            ScrollAxis::Horizontal => ResizeEdge::LEFT,
+            ScrollAxis::Vertical => ResizeEdge::TOP,
+        };
         self.interactively_resizing_by_left_edge = tile
             .window()
             .interactive_resize_data()
-            .is_some_and(|data| data.edges.contains(ResizeEdge::LEFT));
+            .is_some_and(|data| data.edges.contains(main_leading));
     }
 }
 
@@ -4111,7 +4136,7 @@ impl<W: LayoutElement> Column<W> {
 
         for (tile, data) in zip(&mut self.tiles, &mut self.data) {
             tile.update_config(view_size, scale, options.clone());
-            data.update(tile);
+            data.update(tile, self.options.scroll_axis);
         }
 
         self.tab_indicator
@@ -4373,7 +4398,7 @@ impl<W: LayoutElement> Column<W> {
         }
 
         self.data
-            .insert(idx, TileData::new(&tile, WindowHeight::auto_1()));
+            .insert(idx, TileData::new(&tile, WindowHeight::auto_1(), self.options.scroll_axis));
         self.tiles.insert(idx, tile);
         self.update_tile_sizes(true);
 
@@ -4399,7 +4424,7 @@ impl<W: LayoutElement> Column<W> {
         let prev_height = self.data[tile_idx].size.h;
 
         tile.update_window();
-        self.data[tile_idx].update(tile);
+        self.data[tile_idx].update(tile, self.options.scroll_axis);
 
         let offset = prev_height - self.data[tile_idx].size.h;
 
@@ -5484,7 +5509,7 @@ impl<W: LayoutElement> Column<W> {
             tile.verify_invariants();
 
             let mut data2 = *data;
-            data2.update(tile);
+            data2.update(tile, self.options.scroll_axis);
             assert_eq!(data, &data2, "tile data must be up to date");
 
             if matches!(data.height, WindowHeight::Fixed(_)) {
