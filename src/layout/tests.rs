@@ -4062,17 +4062,7 @@ fn vertical_window_spans_full_width() {
     assert!(v.h < h.h, "vertical shorter on the main axis: h={h:?} v={v:?}");
 }
 
-fn build_transpose_layout(
-    scroll_axis: ScrollAxis,
-    output_size: (i32, i32),
-    extra_ops: &[Op],
-) -> Layout<TestWindow> {
-    let options = Options {
-        scroll_axis,
-        ..Default::default()
-    };
-    let mut layout = Layout::with_options(Clock::with_time(Duration::ZERO), options);
-
+fn sized_output(output_size: (i32, i32)) -> Output {
     let name = "output1".to_string();
     let output = Output::new(
         name.clone(),
@@ -4099,7 +4089,20 @@ fn build_transpose_layout(
         model: None,
         serial: None,
     });
-    layout.add_output(output, None);
+    output
+}
+
+fn build_transpose_layout(
+    scroll_axis: ScrollAxis,
+    output_size: (i32, i32),
+    extra_ops: &[Op],
+) -> Layout<TestWindow> {
+    let options = Options {
+        scroll_axis,
+        ..Default::default()
+    };
+    let mut layout = Layout::with_options(Clock::with_time(Duration::ZERO), options);
+    layout.add_output(sized_output(output_size), None);
 
     // One two-tile column beside a one-tile column exercises column positions, tile
     // stacking, and sizes; extra_ops layer resize or other mutations before settling.
@@ -4226,5 +4229,102 @@ fn vertical_multi_resize_transposed() {
     for (i, ((hp, hs), (vp, vs))) in h.iter().zip(v.iter()).enumerate() {
         assert_point_transposed(*hp, *vp, &format!("multi-resized tile {i}"));
         assert_size_transposed(*hs, *vs, &format!("multi-resized tile {i}"));
+    }
+}
+
+// Ops with the same structural effect regardless of scroll axis, so geometry must mirror.
+// Tabbed display is excluded: the tab indicator is screen-absolute, not mirror-able.
+#[derive(Debug, Clone, Arbitrary)]
+enum NeutralOp {
+    AddWindow,
+    Consume,
+    Expel,
+    SetColumnWidth(#[proptest(strategy = "arbitrary_size_change()")] SizeChange),
+    SetWindowHeight(#[proptest(strategy = "arbitrary_size_change()")] SizeChange),
+    FocusColumnFirst,
+    FocusColumnLast,
+}
+
+fn build_neutral_transpose_layout(
+    scroll_axis: ScrollAxis,
+    output_size: (i32, i32),
+    ops: &[NeutralOp],
+) -> Layout<TestWindow> {
+    let options = Options {
+        scroll_axis,
+        ..Default::default()
+    };
+    let mut layout = Layout::with_options(Clock::with_time(Duration::ZERO), options);
+    layout.add_output(sized_output(output_size), None);
+
+    let mut real_ops: Vec<Op> = Vec::new();
+    let mut next_id: usize = 1;
+    let mut ids: Vec<usize> = Vec::new();
+    for op in ops {
+        match op {
+            NeutralOp::AddWindow => {
+                real_ops.push(Op::AddWindow {
+                    params: TestWindowParams::new(next_id),
+                });
+                real_ops.push(Op::Communicate(next_id));
+                ids.push(next_id);
+                next_id += 1;
+            }
+            NeutralOp::Consume => real_ops.push(Op::ConsumeWindowIntoColumn),
+            NeutralOp::Expel => real_ops.push(Op::ExpelWindowFromColumn),
+            NeutralOp::SetColumnWidth(c) => real_ops.push(Op::SetColumnWidth(*c)),
+            NeutralOp::SetWindowHeight(c) => {
+                real_ops.push(Op::SetWindowHeight {
+                    id: None,
+                    change: *c,
+                })
+            }
+            NeutralOp::FocusColumnFirst => real_ops.push(Op::FocusColumnFirst),
+            NeutralOp::FocusColumnLast => real_ops.push(Op::FocusColumnLast),
+        }
+    }
+    for id in ids {
+        real_ops.push(Op::Communicate(id));
+    }
+    real_ops.push(Op::AdvanceAnimations { msec_delta: 1000 });
+    check_ops_on_layout(&mut layout, real_ops);
+
+    layout
+}
+
+proptest! {
+    // Any orientation-neutral op sequence must produce mirror geometry on a landscape
+    // output versus a dimension-swapped portrait output. Catches latent wrong-axis bugs
+    // across operation combinations the curated tests do not reach.
+    #[test]
+    fn vertical_mirrors_horizontal_over_random_ops(
+        ops in prop::collection::vec(any::<NeutralOp>(), 0..24),
+    ) {
+        let h = transpose_tile_geometry(&build_neutral_transpose_layout(
+            ScrollAxis::Horizontal,
+            (1280, 720),
+            &ops,
+        ));
+        let v = transpose_tile_geometry(&build_neutral_transpose_layout(
+            ScrollAxis::Vertical,
+            (720, 1280),
+            &ops,
+        ));
+
+        prop_assert_eq!(h.len(), v.len(), "same tile count both orientations");
+        for ((hp, hs), (vp, vs)) in h.iter().zip(v.iter()) {
+            prop_assert!(
+                (vp.x - hp.y).abs() < 1. && (vp.y - hp.x).abs() < 1.,
+                "position not transposed: h={:?} v={:?}",
+                hp,
+                vp
+            );
+            prop_assert!(
+                (vs.w - hs.h).abs() < 1. && (vs.h - hs.w).abs() < 1.,
+                "size not transposed: h={:?} v={:?}",
+                hs,
+                vs
+            );
+        }
     }
 }

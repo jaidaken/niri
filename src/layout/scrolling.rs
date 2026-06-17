@@ -5556,6 +5556,10 @@ impl<W: LayoutElement> Column<W> {
         let working_size = self.working_area.size;
         let extra_size = self.extra_size();
         let gaps = self.options.layout.gaps;
+        // Tiles stack along the cross axis; their "height" budget is the cross extent.
+        let axis = self.options.scroll_axis;
+        let working_cross = axis.cross_size(working_size);
+        let extra_cross = axis.cross_size(extra_size);
 
         let mut found_fixed = false;
         let mut total_height = 0.;
@@ -5588,22 +5592,22 @@ impl<W: LayoutElement> Column<W> {
             }
 
             let requested_size = tile.window().requested_size().unwrap();
-            let requested_tile_height =
-                tile.tile_height_for_window_height(f64::from(requested_size.h));
-            let min_tile_height = f64::max(1., tile.min_size_nonfullscreen().h);
+            let requested_tile_height = tile
+                .tile_height_for_window_height(f64::from(axis.cross_size(requested_size)));
+            let min_tile_height = f64::max(1., axis.cross_size(tile.min_size_nonfullscreen()));
 
             if !is_tabbed
                 && self.pending_sizing_mode().is_normal()
                 && self.scale.round() == self.scale
-                && working_size.h.round() == working_size.h
+                && working_cross.round() == working_cross
                 && gaps.round() == gaps
             {
-                let total_height = requested_tile_height + gaps * 2. + extra_size.h;
-                let total_min_height = min_tile_height + gaps * 2. + extra_size.h;
-                let max_height = f64::max(total_min_height, working_size.h);
+                let total_height = requested_tile_height + gaps * 2. + extra_cross;
+                let total_min_height = min_tile_height + gaps * 2. + extra_cross;
+                let max_height = f64::max(total_min_height, working_cross);
                 assert!(
                     total_height <= max_height,
-                    "each tile in a column mustn't go beyond working area height \
+                    "each tile in a column mustn't go beyond working area cross extent \
                      (tile height {total_height} > max height {max_height})"
                 );
             }
@@ -5615,15 +5619,15 @@ impl<W: LayoutElement> Column<W> {
         if !is_tabbed
             && tile_count > 1
             && self.scale.round() == self.scale
-            && working_size.h.round() == working_size.h
+            && working_cross.round() == working_cross
             && gaps.round() == gaps
         {
-            total_height += gaps * (tile_count + 1) as f64 + extra_size.h;
-            total_min_height += gaps * (tile_count + 1) as f64 + extra_size.h;
-            let max_height = f64::max(total_min_height, working_size.h);
+            total_height += gaps * (tile_count + 1) as f64 + extra_cross;
+            total_min_height += gaps * (tile_count + 1) as f64 + extra_cross;
+            let max_height = f64::max(total_min_height, working_cross);
             assert!(
                 total_height <= max_height,
-                "multiple tiles in a column mustn't go beyond working area height \
+                "multiple tiles in a column mustn't go beyond working area cross extent \
                  (total height {total_height} > max height {max_height})"
             );
         }
