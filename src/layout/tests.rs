@@ -4061,3 +4061,93 @@ fn vertical_window_spans_full_width() {
     assert!(v.w > h.w, "vertical spans the cross width: h={h:?} v={v:?}");
     assert!(v.h < h.h, "vertical shorter on the main axis: h={h:?} v={v:?}");
 }
+
+fn transpose_layout_geometry(
+    scroll_axis: ScrollAxis,
+    output_size: (i32, i32),
+) -> Vec<(Point<f64, Logical>, Size<f64, Logical>)> {
+    let options = Options {
+        scroll_axis,
+        ..Default::default()
+    };
+    let mut layout = Layout::with_options(Clock::with_time(Duration::ZERO), options);
+
+    let name = "output1".to_string();
+    let output = Output::new(
+        name.clone(),
+        PhysicalProperties {
+            size: Size::from(output_size),
+            subpixel: Subpixel::Unknown,
+            make: String::new(),
+            model: String::new(),
+            serial_number: String::new(),
+        },
+    );
+    output.change_current_state(
+        Some(Mode {
+            size: Size::from(output_size),
+            refresh: 60000,
+        }),
+        None,
+        None,
+        None,
+    );
+    output.user_data().insert_if_missing(|| OutputName {
+        connector: name,
+        make: None,
+        model: None,
+        serial: None,
+    });
+    layout.add_output(output, None);
+
+    let ops = [
+        Op::AddWindow {
+            params: TestWindowParams::new(1),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(2),
+        },
+        Op::AddWindow {
+            params: TestWindowParams::new(3),
+        },
+        // One two-tile column beside a one-tile column exercises column positions,
+        // tile stacking, and tile sizes in a single layout.
+        Op::FocusColumnFirst,
+        Op::ConsumeWindowIntoColumn,
+        Op::Communicate(1),
+        Op::Communicate(2),
+        Op::Communicate(3),
+        Op::AdvanceAnimations { msec_delta: 1000 },
+    ];
+    check_ops_on_layout(&mut layout, ops);
+
+    layout
+        .active_workspace()
+        .unwrap()
+        .scrolling()
+        .tiles_with_render_positions()
+        .map(|(tile, pos, _)| (pos, tile.tile_size()))
+        .collect()
+}
+
+#[test]
+fn vertical_layout_is_horizontal_transposed() {
+    // Same ops on a landscape vs a dimension-swapped portrait output must produce
+    // x<->y / w<->h mirror geometry; fails if any cluster transposes only one axis.
+    let h = transpose_layout_geometry(ScrollAxis::Horizontal, (1280, 720));
+    let v = transpose_layout_geometry(ScrollAxis::Vertical, (720, 1280));
+
+    assert_eq!(h.len(), 3, "three tiles laid out");
+    assert_eq!(v.len(), h.len(), "same tile count both orientations");
+
+    for (i, ((hp, hs), (vp, vs))) in h.iter().zip(v.iter()).enumerate() {
+        assert!(
+            (vp.x - hp.y).abs() < 0.5 && (vp.y - hp.x).abs() < 0.5,
+            "tile {i} position not transposed: h={hp:?} v={vp:?}"
+        );
+        assert!(
+            (vs.w - hs.h).abs() < 0.5 && (vs.h - hs.w).abs() < 0.5,
+            "tile {i} size not transposed: h={hs:?} v={vs:?}"
+        );
+    }
+}
