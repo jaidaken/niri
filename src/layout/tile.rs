@@ -626,6 +626,15 @@ impl<W: LayoutElement> Tile<W> {
         }
     }
 
+    pub fn offset_move_x_anim_current(&mut self, offset: f64) {
+        if let Some(move_) = self.move_x_animation.as_mut() {
+            let value = move_.anim.value();
+            if value > 0.001 {
+                move_.from += offset / value;
+            }
+        }
+    }
+
     pub fn stop_move_animations(&mut self) {
         self.move_x_animation = None;
         self.move_y_animation = None;

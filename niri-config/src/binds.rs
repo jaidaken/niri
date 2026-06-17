@@ -177,7 +177,11 @@ pub enum Action {
     FocusColumnOrMonitorLeft,
     FocusColumnOrMonitorRight,
     FocusWindowDown,
+    #[knuffel(skip)]
+    FocusWindowDownUnderMouse,
     FocusWindowUp,
+    #[knuffel(skip)]
+    FocusWindowUpUnderMouse,
     FocusWindowDownOrColumnLeft,
     FocusWindowDownOrColumnRight,
     FocusWindowUpOrColumnLeft,

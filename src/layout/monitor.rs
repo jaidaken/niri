@@ -1701,8 +1701,10 @@ impl<W: LayoutElement> Monitor<W> {
         let _span = tracy_client::span!("Monitor::render_workspaces");
 
         let scale = self.scale.fractional_scale();
-        // Ceil the height in physical pixels.
-        let height = (self.view_size.h * scale).ceil() as i32;
+        // Workspaces switch along the perpendicular of the scroll axis; the finite crop runs along
+        // it. Ceil that extent in physical pixels.
+        let ws_axis = self.options.scroll_axis.perpendicular();
+        let switch_extent = (ws_axis.main_size(self.view_size) * scale).ceil() as i32;
 
         // Crop the elements to prevent them overflowing, currently visible during a workspace
         // switch.
@@ -1716,8 +1718,8 @@ impl<W: LayoutElement> Monitor<W> {
         // FIXME: use proper bounds after fixing the Crop element.
         let crop_bounds = if self.workspace_switch.is_some() || self.overview_progress.is_some() {
             Rectangle::new(
-                Point::from((-i32::MAX / 2, 0)),
-                Size::from((i32::MAX, height)),
+                ws_axis.point(0, -i32::MAX / 2),
+                ws_axis.size(switch_extent, i32::MAX),
             )
         } else {
             Rectangle::new(

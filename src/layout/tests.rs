@@ -4204,3 +4204,27 @@ fn vertical_insert_hint_transposed() {
         assert_size_transposed(hr.size, vr.size, &format!("{pos:?} hint"));
     }
 }
+
+#[test]
+fn vertical_multi_resize_transposed() {
+    // Resizing two windows in one column forces the auto-weight redistribution path
+    // (convert_heights_to_auto), which reads the stacking extent; sizes must still transpose.
+    let ops = [
+        Op::SetWindowHeight {
+            id: Some(1),
+            change: SizeChange::SetProportion(40.),
+        },
+        Op::SetWindowHeight {
+            id: Some(2),
+            change: SizeChange::SetProportion(40.),
+        },
+    ];
+    let h = transpose_tile_geometry(&build_transpose_layout(ScrollAxis::Horizontal, (1280, 720), &ops));
+    let v = transpose_tile_geometry(&build_transpose_layout(ScrollAxis::Vertical, (720, 1280), &ops));
+
+    assert_eq!(h.len(), 3, "three tiles laid out");
+    for (i, ((hp, hs), (vp, vs))) in h.iter().zip(v.iter()).enumerate() {
+        assert_point_transposed(*hp, *vp, &format!("multi-resized tile {i}"));
+        assert_size_transposed(*hs, *vs, &format!("multi-resized tile {i}"));
+    }
+}

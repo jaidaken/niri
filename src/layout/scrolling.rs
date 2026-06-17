@@ -4461,12 +4461,14 @@ impl<W: LayoutElement> Column<W> {
             .find(|(_, tile)| tile.window().id() == window)
             .unwrap();
 
-        let prev_height = self.data[tile_idx].size.h;
+        // A window's height is its extent along the tile-stacking (cross) axis.
+        let axis = self.options.scroll_axis;
+        let prev_height = axis.cross_size(self.data[tile_idx].size);
 
         tile.update_window();
         self.data[tile_idx].update(tile, self.options.scroll_axis);
 
-        let offset = prev_height - self.data[tile_idx].size.h;
+        let offset = prev_height - axis.cross_size(self.data[tile_idx].size);
 
         let is_tabbed = self.display_mode == ColumnDisplay::Tabbed;
 
@@ -4482,10 +4484,15 @@ impl<W: LayoutElement> Column<W> {
                 // tile.update_window()), then the apparent size change is smooth with no sudden
                 // jumps. This corresponds to adding an Y animation to tiles below.
                 for tile in &mut self.tiles[tile_idx + 1..] {
-                    tile.animate_move_y_from_with_config(
-                        offset,
-                        self.options.animations.window_resize.anim,
-                    );
+                    let config = self.options.animations.window_resize.anim;
+                    match axis {
+                        ScrollAxis::Horizontal => {
+                            tile.animate_move_y_from_with_config(offset, config)
+                        }
+                        ScrollAxis::Vertical => {
+                            tile.animate_move_x_from_with_config(offset, config)
+                        }
+                    }
                 }
             } else {
                 // There's no resize animation, but the offset is nonzero. This could happen for
@@ -4503,7 +4510,10 @@ impl<W: LayoutElement> Column<W> {
                 // Notably, this is necessary to fix the animation jump when resizing height back
                 // and forth in quick succession (in a way that cancels the resize animation).
                 for tile in &mut self.tiles[tile_idx + 1..] {
-                    tile.offset_move_y_anim_current(offset);
+                    match axis {
+                        ScrollAxis::Horizontal => tile.offset_move_y_anim_current(offset),
+                        ScrollAxis::Vertical => tile.offset_move_x_anim_current(offset),
+                    }
                 }
             }
         }
@@ -5176,7 +5186,7 @@ impl<W: LayoutElement> Column<W> {
                 (idx + if forwards { 1 } else { len - 1 }) % len
             }
             _ => {
-                let current = self.data[tile_idx].size.h;
+                let current = self.options.scroll_axis.cross_size(self.data[tile_idx].size);
                 let tile = &self.tiles[tile_idx];
 
                 let mut it = self
@@ -5221,7 +5231,14 @@ impl<W: LayoutElement> Column<W> {
     /// One case where apparent heights will not be preserved is when the column is taller than the
     /// working area.
     fn convert_heights_to_auto(&mut self) {
-        let heights: Vec<_> = self.tiles.iter().map(|tile| tile.tile_size().h).collect();
+        // Window "height" is the tile-stacking (cross) extent: screen height when horizontal,
+        // screen width when vertical.
+        let axis = self.options.scroll_axis;
+        let heights: Vec<_> = self
+            .tiles
+            .iter()
+            .map(|tile| axis.cross_size(tile.tile_size()))
+            .collect();
 
         // Weights are invariant to multiplication: a column with weights 2, 2, 1 is equivalent to
         // a column with weights 4, 4, 2. So we find the median window height and use that as 1.
@@ -5474,13 +5491,14 @@ impl<W: LayoutElement> Column<W> {
         // fixed. Third, the animation for making a column tabbed moves tiles vertically, and using
         // the active tile's animated size in this case only works for the topmost tile, and looks
         // broken otherwise.
-        let mut max_height = 0.;
+        let axis = self.options.scroll_axis;
+        let mut max_cross = 0.;
         for tile in &self.tiles {
-            max_height = f64::max(max_height, tile.tile_size().h);
+            max_cross = f64::max(max_cross, axis.cross_size(tile.tile_size()));
         }
 
         let tile = &self.tiles[self.active_tile_idx];
-        let area_size = Size::from((tile.animated_tile_size().w, max_height));
+        let area_size = axis.size(axis.main_size(tile.animated_tile_size()), max_cross);
 
         Rectangle::new(self.tiles_origin(), area_size)
     }

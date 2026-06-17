@@ -1225,6 +1225,32 @@ impl State {
                 // FIXME: granular
                 self.niri.queue_redraw_all();
             }
+            Action::FocusWindowDownUnderMouse => {
+                if let Some((output, ws)) = self.niri.workspace_under_cursor(true) {
+                    let ws_id = ws.id();
+                    let ws = {
+                        let mut workspaces = self.niri.layout.workspaces_mut();
+                        workspaces.find(|ws| ws.id() == ws_id).unwrap()
+                    };
+                    ws.focus_down();
+                    self.maybe_warp_cursor_to_focus();
+                    self.niri.layer_shell_on_demand_focus = None;
+                    self.niri.queue_redraw(&output);
+                }
+            }
+            Action::FocusWindowUpUnderMouse => {
+                if let Some((output, ws)) = self.niri.workspace_under_cursor(true) {
+                    let ws_id = ws.id();
+                    let ws = {
+                        let mut workspaces = self.niri.layout.workspaces_mut();
+                        workspaces.find(|ws| ws.id() == ws_id).unwrap()
+                    };
+                    ws.focus_up();
+                    self.maybe_warp_cursor_to_focus();
+                    self.niri.layer_shell_on_demand_focus = None;
+                    self.niri.queue_redraw(&output);
+                }
+            }
             Action::FocusWindowDownOrColumnLeft => {
                 self.niri.layout.focus_down_or_left();
                 self.maybe_warp_cursor_to_focus();
@@ -3124,17 +3150,36 @@ impl State {
                 || is_mru_open
                 || self.niri.mods_with_wheel_binds.contains(&modifiers);
             if should_handle {
+                // Overview wheel navigation is screen-relative: pick actions per the output's
+                // scroll axis so a physical wheel direction always moves that screen direction.
+                let overview_axis = match self.niri.output_under_cursor() {
+                    Some(output) => self.niri.layout.scroll_axis_for_output(&output),
+                    None => ScrollAxis::default(),
+                };
+
                 let horizontal = horizontal_amount_v120.unwrap_or(0.);
                 let ticks = self.niri.horizontal_wheel_tracker.accumulate(horizontal);
                 if ticks != 0 {
                     let (bind_left, bind_right) =
                         if should_handle_in_overview && modifiers.is_empty() {
+                            // Horizontal wheel walks columns when scrolling horizontally, or
+                            // switches workspaces when scrolling vertically (they sit side by side).
+                            let (left_action, right_action) = match overview_axis {
+                                ScrollAxis::Horizontal => (
+                                    Action::FocusColumnLeftUnderMouse,
+                                    Action::FocusColumnRightUnderMouse,
+                                ),
+                                ScrollAxis::Vertical => (
+                                    Action::FocusWorkspaceUpUnderMouse,
+                                    Action::FocusWorkspaceDownUnderMouse,
+                                ),
+                            };
                             let bind_left = Some(Bind {
                                 key: Key {
                                     trigger: Trigger::WheelScrollLeft,
                                     modifiers: Modifiers::empty(),
                                 },
-                                action: Action::FocusColumnLeftUnderMouse,
+                                action: left_action,
                                 repeat: true,
                                 cooldown: None,
                                 allow_when_locked: false,
@@ -3146,7 +3191,7 @@ impl State {
                                     trigger: Trigger::WheelScrollRight,
                                     modifiers: Modifiers::empty(),
                                 },
-                                action: Action::FocusColumnRightUnderMouse,
+                                action: right_action,
                                 repeat: true,
                                 cooldown: None,
                                 allow_when_locked: false,
@@ -3198,12 +3243,24 @@ impl State {
                 if ticks != 0 {
                     let (bind_up, bind_down) = if should_handle_in_overview && modifiers.is_empty()
                     {
+                        // Vertical wheel switches workspaces when scrolling horizontally, or walks
+                        // columns when scrolling vertically (they stack up and down).
+                        let (up_action, down_action) = match overview_axis {
+                            ScrollAxis::Horizontal => (
+                                Action::FocusWorkspaceUpUnderMouse,
+                                Action::FocusWorkspaceDownUnderMouse,
+                            ),
+                            ScrollAxis::Vertical => (
+                                Action::FocusWindowUpUnderMouse,
+                                Action::FocusWindowDownUnderMouse,
+                            ),
+                        };
                         let bind_up = Some(Bind {
                             key: Key {
                                 trigger: Trigger::WheelScrollUp,
                                 modifiers: Modifiers::empty(),
                             },
-                            action: Action::FocusWorkspaceUpUnderMouse,
+                            action: up_action,
                             repeat: true,
                             cooldown: Some(Duration::from_millis(50)),
                             allow_when_locked: false,
@@ -3215,7 +3272,7 @@ impl State {
                                 trigger: Trigger::WheelScrollDown,
                                 modifiers: Modifiers::empty(),
                             },
-                            action: Action::FocusWorkspaceDownUnderMouse,
+                            action: down_action,
                             repeat: true,
                             cooldown: Some(Duration::from_millis(50)),
                             allow_when_locked: false,
@@ -3224,12 +3281,23 @@ impl State {
                         });
                         (bind_up, bind_down)
                     } else if should_handle_in_overview && modifiers == Modifiers::SHIFT {
+                        // Shift + vertical wheel does the orthogonal navigation.
+                        let (up_action, down_action) = match overview_axis {
+                            ScrollAxis::Horizontal => (
+                                Action::FocusColumnLeftUnderMouse,
+                                Action::FocusColumnRightUnderMouse,
+                            ),
+                            ScrollAxis::Vertical => (
+                                Action::FocusWorkspaceUpUnderMouse,
+                                Action::FocusWorkspaceDownUnderMouse,
+                            ),
+                        };
                         let bind_up = Some(Bind {
                             key: Key {
                                 trigger: Trigger::WheelScrollUp,
                                 modifiers: Modifiers::empty(),
                             },
-                            action: Action::FocusColumnLeftUnderMouse,
+                            action: up_action,
                             repeat: true,
                             cooldown: Some(Duration::from_millis(50)),
                             allow_when_locked: false,
@@ -3241,7 +3309,7 @@ impl State {
                                 trigger: Trigger::WheelScrollDown,
                                 modifiers: Modifiers::empty(),
                             },
-                            action: Action::FocusColumnRightUnderMouse,
+                            action: down_action,
                             repeat: true,
                             cooldown: Some(Duration::from_millis(50)),
                             allow_when_locked: false,
