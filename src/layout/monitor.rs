@@ -1925,25 +1925,30 @@ impl<W: LayoutElement> Monitor<W> {
         let config = &self.options.gestures.dnd_edge_workspace_switch;
         let trigger_height = config.trigger_height;
 
-        // Restrict the scrolling horizontally to the strip of workspaces to avoid unwanted trigger
-        // after using the hot corner or during horizontal scroll.
-        let width = self.view_size.w * zoom;
-        let x = pos.x - (self.view_size.w - width) / 2.;
+        // Workspaces switch along the axis perpendicular to scrolling; trigger zones sit at its
+        // ends, and the restriction strip runs along the scroll axis.
+        let axis = self.options.scroll_axis;
+        let ws_axis = axis.perpendicular();
+
+        // Restrict the scrolling to the strip of workspaces to avoid unwanted trigger after using
+        // the hot corner or during scrolling along the main axis.
+        let strip = axis.main_size(self.view_size) * zoom;
+        let along = axis.main(pos) - (axis.main_size(self.view_size) - strip) / 2.;
 
         // Consider the working area so layer-shell docks and such don't prevent scrolling.
-        let y = pos.y - self.working_area.loc.y;
-        let height = self.working_area.size.h;
+        let across = ws_axis.main(pos) - ws_axis.main(self.working_area.loc);
+        let extent = ws_axis.main_size(self.working_area.size);
 
-        let y = y.clamp(0., height);
-        let trigger_height = trigger_height.clamp(0., height / 2.);
+        let across = across.clamp(0., extent);
+        let trigger_height = trigger_height.clamp(0., extent / 2.);
 
-        let delta = if x < 0. || width <= x {
-            // Outside the bounds horizontally.
+        let delta = if along < 0. || strip <= along {
+            // Outside the workspace strip along the scroll axis.
             0.
-        } else if y < trigger_height {
-            -(trigger_height - y)
-        } else if height - y < trigger_height {
-            trigger_height - (height - y)
+        } else if across < trigger_height {
+            -(trigger_height - across)
+        } else if extent - across < trigger_height {
+            trigger_height - (extent - across)
         } else {
             0.
         };

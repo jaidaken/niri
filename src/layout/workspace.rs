@@ -1894,18 +1894,20 @@ impl<W: LayoutElement> Workspace<W> {
     pub fn dnd_scroll_gesture_scroll(&mut self, pos: Point<f64, Logical>, speed: f64) -> bool {
         let config = &self.options.gestures.dnd_edge_view_scroll;
         let trigger_width = config.trigger_width;
+        let axis = self.options.scroll_axis;
 
+        // The view scrolls along the main axis; trigger zones sit at its edges.
         // This working area intentionally does not include extra struts from Options.
-        let x = pos.x - self.working_area.loc.x;
-        let width = self.working_area.size.w;
+        let along = axis.main(pos) - axis.main(self.working_area.loc);
+        let extent = axis.main_size(self.working_area.size);
 
-        let x = x.clamp(0., width);
-        let trigger_width = trigger_width.clamp(0., width / 2.);
+        let along = along.clamp(0., extent);
+        let trigger_width = trigger_width.clamp(0., extent / 2.);
 
-        let delta = if x < trigger_width {
-            -(trigger_width - x)
-        } else if width - x < trigger_width {
-            trigger_width - (width - x)
+        let delta = if along < trigger_width {
+            -(trigger_width - along)
+        } else if extent - along < trigger_width {
+            trigger_width - (extent - along)
         } else {
             0.
         };
