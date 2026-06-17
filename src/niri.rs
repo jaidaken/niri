@@ -1056,6 +1056,9 @@ impl State {
             }
         }
 
+        // Track focus when the view moved under a stationary pointer (workspace switch, scroll).
+        self.niri.focus_follows_mouse_under_pointer();
+
         if !self.update_pointer_contents() {
             return;
         }
@@ -6262,6 +6265,59 @@ impl Niri {
                 self.layer_shell_on_demand_focus = Some(layer.clone());
             }
         }
+    }
+
+    /// Re-runs focus-follows-mouse against the window currently under the pointer.
+    ///
+    /// Called from the refresh cycle so focus tracks the cursor when the view moves under a
+    /// stationary pointer (workspace switch, column scroll), not only on pointer motion. The
+    /// caller skips this while a transition is ongoing, so it settles once the animation ends.
+    pub fn focus_follows_mouse_under_pointer(&mut self) {
+        let Some(ffm) = self.config.borrow().input.focus_follows_mouse else {
+            return;
+        };
+
+        let pointer = self.seat.get_pointer().unwrap();
+        if pointer.is_grabbed() {
+            return;
+        }
+
+        if self.window_mru_ui.is_open() || self.layout.is_overview_open() {
+            return;
+        }
+
+        let under = self.contents_under(pointer.current_location());
+        let Some((window, hit)) = under.window else {
+            return;
+        };
+
+        // Don't trigger focus-follows-mouse over the tab indicator.
+        if matches!(
+            hit,
+            HitType::Activate {
+                is_tab_indicator: true
+            }
+        ) {
+            return;
+        }
+
+        // Already focused: nothing to do, and avoids emitting redundant focus changes.
+        if self.layout.focus().map(|w| &w.window) == Some(&window) {
+            return;
+        }
+
+        if !self.layout.should_trigger_focus_follows_mouse_on(&window) {
+            return;
+        }
+
+        if let Some(threshold) = ffm.max_scroll_amount {
+            if self.layout.scroll_amount_to_activate(&window) > threshold.0 {
+                return;
+            }
+        }
+
+        self.layout.activate_window_without_raising(&window);
+        self.layer_shell_on_demand_focus = None;
     }
 
     pub fn do_screen_transition(&mut self, renderer: &mut GlesRenderer, delay_ms: Option<u16>) {
