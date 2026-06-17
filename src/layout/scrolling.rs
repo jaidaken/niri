@@ -1374,8 +1374,9 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 let width = self.data[col_idx].width;
                 let offset = if centered {
                     // FIXME: when view_offset becomes fractional, this can be made additive too.
-                    let new_offset =
-                        -(self.working_area.size.w - width) / 2. - self.working_area.loc.x;
+                    let axis = self.options.scroll_axis;
+                    let new_offset = -(axis.main_size(self.working_area.size) - width) / 2.
+                        - axis.main(self.working_area.loc);
                     new_offset - self.view_offset.target()
                 } else if resize.edges.contains(ResizeEdge::LEFT) {
                     -offset
@@ -1452,7 +1453,8 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         let new_col_x = self.column_x(column_idx);
         let from_view_offset = target_x - new_col_x;
 
-        (from_view_offset - new_view_offset).abs() / self.working_area.size.w
+        (from_view_offset - new_view_offset).abs()
+            / self.options.scroll_axis.main_size(self.working_area.size)
     }
 
     pub fn activate_window(&mut self, window: &W::Id) -> bool {
@@ -2548,19 +2550,25 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         // First window on an empty workspace will cancel out any view offset. Replicate this
         // effect here.
         if self.columns.is_empty() {
+            let axis = self.options.scroll_axis;
             let view_offset = if self.is_centering_focused_column() {
                 self.compute_new_view_offset_centered(
                     Some(0.),
                     0.,
-                    hint_area.size.w,
+                    axis.main_size(hint_area.size),
                     SizingMode::Normal,
                 )
             } else {
-                self.compute_new_view_offset_fit(Some(0.), 0., hint_area.size.w, SizingMode::Normal)
+                self.compute_new_view_offset_fit(
+                    Some(0.),
+                    0.,
+                    axis.main_size(hint_area.size),
+                    SizingMode::Normal,
+                )
             };
-            hint_area.loc.x -= view_offset;
+            hint_area.loc = axis.add_main(hint_area.loc, -view_offset);
         } else {
-            hint_area.loc.x -= self.view_pos();
+            hint_area.loc = self.options.scroll_axis.add_main(hint_area.loc, -self.view_pos());
         }
 
         Some(hint_area)
@@ -3102,7 +3110,8 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         gesture.tracker.push(delta_x, timestamp);
 
         let norm_factor = if gesture.is_touchpad {
-            self.working_area.size.w / VIEW_GESTURE_WORKING_AREA_MOVEMENT
+            self.options.scroll_axis.main_size(self.working_area.size)
+                / VIEW_GESTURE_WORKING_AREA_MOVEMENT
         } else {
             1.
         };
@@ -3157,7 +3166,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         } else {
             let gaps = self.options.layout.gaps;
 
-            let mut leftmost = -self.working_area.size.w;
+            let mut leftmost = -self.options.scroll_axis.main_size(self.working_area.size);
 
             let last_col_idx = self.columns.len() - 1;
             let last_col_x = self
@@ -3166,7 +3175,8 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 .take(last_col_idx)
                 .fold(0., |col_x, col| col_x + col.width() + gaps);
             let last_col_width = self.data[last_col_idx].width;
-            let mut rightmost = last_col_x + last_col_width - self.working_area.loc.x;
+            let mut rightmost =
+                last_col_x + last_col_width - self.options.scroll_axis.main(self.working_area.loc);
 
             let active_col_x = self
                 .columns
@@ -3206,7 +3216,8 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         gesture.tracker.push(0., now);
 
         let norm_factor = if gesture.is_touchpad {
-            self.working_area.size.w / VIEW_GESTURE_WORKING_AREA_MOVEMENT
+            self.options.scroll_axis.main_size(self.working_area.size)
+                / VIEW_GESTURE_WORKING_AREA_MOVEMENT
         } else {
             1.
         };
@@ -3232,6 +3243,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             col_idx: usize,
         }
 
+        let axis = self.options.scroll_axis;
         let mut snapping_points = Vec::new();
 
         if self.is_centering_focused_column() {
@@ -3246,14 +3258,14 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                     self.working_area
                 };
 
-                let left_strut = area.loc.x;
+                let left_strut = axis.main(area.loc);
 
                 let view_pos = if mode.is_fullscreen() {
                     col_x
-                } else if area.size.w <= col_w {
+                } else if axis.main_size(area.size) <= col_w {
                     col_x - left_strut
                 } else {
-                    col_x - (area.size.w - col_w) / 2. - left_strut
+                    col_x - (axis.main_size(area.size) - col_w) / 2. - left_strut
                 };
                 snapping_points.push(Snap { view_pos, col_idx });
 
@@ -3265,7 +3277,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 CenterFocusedColumn::OnOverflow
             );
 
-            let view_width = self.view_size.w;
+            let view_width = axis.main_size(self.view_size);
             let gaps = self.options.layout.gaps;
 
             let snap_points =
@@ -3279,8 +3291,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                         self.working_area
                     };
 
-                    let left_strut = area.loc.x;
-                    let right_strut = self.view_size.w - area.size.w - area.loc.x;
+                    let left_strut = axis.main(area.loc);
+                    let right_strut = axis.main_size(self.view_size)
+                        - axis.main_size(area.size)
+                        - axis.main(area.loc);
 
                     // Normal columns align with the working area, but fullscreen columns align with
                     // the view size.
@@ -3293,13 +3307,13 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                         let padding = if mode.is_maximized() {
                             0.
                         } else {
-                            ((area.size.w - col_w) / 2.).clamp(0., gaps)
+                            ((axis.main_size(area.size) - col_w) / 2.).clamp(0., gaps)
                         };
 
-                        let center = if area.size.w <= col_w {
+                        let center = if axis.main_size(area.size) <= col_w {
                             col_x - left_strut
                         } else {
-                            col_x - (area.size.w - col_w) / 2. - left_strut
+                            col_x - (axis.main_size(area.size) - col_w) / 2. - left_strut
                         };
                         let is_overflowing = |adj_col_w: Option<f64>| {
                             center_on_overflow
@@ -3309,7 +3323,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                                         // fixed-size maximized windows (they have a different area
                                         // and padding).
                                         center_on_overflow
-                                            && adj_col_w + 3.0 * gaps + col_w > area.size.w
+                                            && adj_col_w + 3.0 * gaps + col_w > axis.main_size(area.size)
                                     })
                                     .is_some()
                         };
@@ -3433,20 +3447,24 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                         self.working_area
                     };
 
-                    let left_strut = area.loc.x;
+                    let left_strut = self.options.scroll_axis.main(area.loc);
 
                     if mode.is_fullscreen() {
-                        if target_snap.view_pos + self.view_size.w < col_x + col_w {
+                        if target_snap.view_pos + self.options.scroll_axis.main_size(self.view_size)
+                            < col_x + col_w
+                        {
                             break;
                         }
                     } else {
                         let padding = if mode.is_maximized() {
                             0.
                         } else {
-                            ((area.size.w - col_w) / 2.).clamp(0., self.options.layout.gaps)
+                            ((self.options.scroll_axis.main_size(area.size) - col_w) / 2.)
+                                .clamp(0., self.options.layout.gaps)
                         };
 
-                        if target_snap.view_pos + left_strut + area.size.w < col_x + col_w + padding
+                        if target_snap.view_pos + left_strut + self.options.scroll_axis.main_size(area.size)
+                            < col_x + col_w + padding
                         {
                             break;
                         }
@@ -3467,7 +3485,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                         self.working_area
                     };
 
-                    let left_strut = area.loc.x;
+                    let left_strut = self.options.scroll_axis.main(area.loc);
 
                     if mode.is_fullscreen() {
                         if col_x < target_snap.view_pos {
@@ -3477,7 +3495,8 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                         let padding = if mode.is_maximized() {
                             0.
                         } else {
-                            ((area.size.w - col_w) / 2.).clamp(0., self.options.layout.gaps)
+                            ((self.options.scroll_axis.main_size(area.size) - col_w) / 2.)
+                                .clamp(0., self.options.layout.gaps)
                         };
 
                         if col_x - padding < target_snap.view_pos + left_strut {
@@ -4939,11 +4958,12 @@ impl<W: LayoutElement> Column<W> {
                 ColumnWidth::Proportion(proportion)
             }
             (ColumnWidth::Fixed(_), SizeChange::AdjustProportion(delta)) => {
-                let full = self.working_area.size.w - self.options.layout.gaps;
+                let axis = self.options.scroll_axis;
+                let full = axis.main_size(self.working_area.size) - self.options.layout.gaps;
                 let current = if full == 0. {
                     1.
                 } else {
-                    (current_px + self.options.layout.gaps + self.extra_size().w) / full
+                    (current_px + self.options.layout.gaps + axis.main_size(self.extra_size())) / full
                 };
                 let proportion = (current + delta / 100.).clamp(0., MAX_F);
                 ColumnWidth::Proportion(proportion)
