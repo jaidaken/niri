@@ -1120,9 +1120,13 @@ impl<W: LayoutElement> Monitor<W> {
                                 let geo = insert_hint_ws_geo.unwrap();
                                 let geo = geo.downscale(zoom);
 
-                                area.loc.x = area.loc.x.max(-geo.loc.x - area.size.w / 2.);
-                                area.loc.x =
-                                    area.loc.x.min(geo.loc.x + geo.size.w - area.size.w / 2.);
+                                // New columns insert along the scroll (main) axis; clamp it there.
+                                let axis = self.options.scroll_axis;
+                                let half = axis.main_size(area.size) / 2.;
+                                let lo = -axis.main(geo.loc) - half;
+                                let hi = axis.main(geo.loc) + axis.main_size(geo.size) - half;
+                                let main = axis.main(area.loc).max(lo).min(hi);
+                                area.loc = axis.point(main, axis.cross(area.loc));
                             }
 
                             // Round to physical pixels.
@@ -1148,18 +1152,21 @@ impl<W: LayoutElement> Monitor<W> {
                     let scale = self.scale.fractional_scale();
                     let zoom = self.overview_zoom();
                     let gap = self.workspace_gap(zoom);
+                    // The hint is a bar sitting in the workspace gap: its thickness runs along the
+                    // switch axis (perpendicular), its length spans the scroll (main) axis.
+                    let axis = self.options.scroll_axis;
 
                     let hint_gap = round_logical_in_physical(scale, gap * 0.1);
-                    let hint_height = gap - hint_gap * 2.;
+                    let hint_thickness = gap - hint_gap * 2.;
 
                     let next_ws_geo = self.workspaces_render_geo().nth(ws_idx).unwrap();
-                    let hint_width = round_logical_in_physical(scale, next_ws_geo.size.w * 0.75);
-                    let hint_x =
-                        round_logical_in_physical(scale, (next_ws_geo.size.w - hint_width) / 2.);
+                    let ws_main = axis.main_size(next_ws_geo.size);
+                    let hint_len = round_logical_in_physical(scale, ws_main * 0.75);
+                    let hint_inset = round_logical_in_physical(scale, (ws_main - hint_len) / 2.);
 
-                    let hint_loc_diff = Point::from((-hint_x, hint_height + hint_gap));
+                    let hint_loc_diff = axis.point(-hint_inset, hint_thickness + hint_gap);
                     let hint_loc = next_ws_geo.loc - hint_loc_diff;
-                    let hint_size = Size::from((hint_width, hint_height));
+                    let hint_size = axis.size(hint_len, hint_thickness);
 
                     // Sometimes the hint ends up 1 px wider than necessary and/or 1 px
                     // narrower than necessary. The values here seem correct. Might have to do with
@@ -1362,13 +1369,16 @@ impl<W: LayoutElement> Monitor<W> {
 
     fn workspace_gap(&self, zoom: f64) -> f64 {
         let scale = self.scale.fractional_scale();
-        let gap = self.view_size.h * 0.1 * zoom;
+        // Workspaces switch along the perpendicular of the scroll axis; the gap sits along it.
+        let ws_axis = self.options.scroll_axis.perpendicular();
+        let gap = ws_axis.main_size(self.view_size) * 0.1 * zoom;
         round_logical_in_physical_max1(scale, gap)
     }
 
     fn workspace_size_with_gap(&self, zoom: f64) -> Size<f64, Logical> {
         let gap = self.workspace_gap(zoom);
-        self.workspace_size(zoom) + Size::from((0., gap))
+        let ws_axis = self.options.scroll_axis.perpendicular();
+        self.workspace_size(zoom) + ws_axis.size(gap, 0.)
     }
 
     pub fn overview_zoom(&self) -> f64 {

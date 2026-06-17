@@ -1097,12 +1097,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
         let movement_config = anim_config.unwrap_or(self.options.animations.window_movement.0);
 
-        // Animate movement of other tiles.
-        // FIXME: tiles can move by X too, in a centered or resizing layout with one window smaller
-        // than the others.
-        let offset_y = column.tile_offset(tile_idx + 1).y - column.tile_offset(tile_idx).y;
+        // Animate movement of other tiles along whichever axis they stack on.
+        let offset = column.tile_offset(tile_idx + 1) - column.tile_offset(tile_idx);
         for tile in &mut column.tiles[tile_idx + 1..] {
-            tile.animate_move_y_from(offset_y);
+            tile.animate_move_from(offset);
         }
 
         if column.display_mode == ColumnDisplay::Tabbed && tile_idx != column.active_tile_idx {
@@ -2524,33 +2522,29 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         &self,
         position: InsertPosition,
     ) -> Option<Rectangle<f64, Logical>> {
+        let axis = self.options.scroll_axis;
         let mut hint_area = match position {
             InsertPosition::NewColumn(column_index) => {
+                let gaps = self.options.layout.gaps;
                 if column_index == 0 || column_index == self.columns.len() {
-                    let size = Size::from((
-                        300.,
-                        self.working_area.size.h - self.options.layout.gaps * 2.,
-                    ));
-                    let mut loc = Point::from((
+                    let size = axis.size(300., axis.cross_size(self.working_area.size) - gaps * 2.);
+                    let mut loc = axis.point(
                         self.column_x(column_index),
-                        self.working_area.loc.y + self.options.layout.gaps,
-                    ));
+                        axis.cross(self.working_area.loc) + gaps,
+                    );
                     if column_index == 0 && !self.columns.is_empty() {
-                        loc.x -= size.w + self.options.layout.gaps;
+                        loc = axis.add_main(loc, -(axis.main_size(size) + gaps));
                     }
                     Rectangle::new(loc, size)
                 } else if column_index > self.columns.len() {
                     error!("insert hint column index is out of range");
                     return None;
                 } else {
-                    let size = Size::from((
-                        300.,
-                        self.working_area.size.h - self.options.layout.gaps * 2.,
-                    ));
-                    let loc = Point::from((
-                        self.column_x(column_index) - size.w / 2. - self.options.layout.gaps / 2.,
-                        self.working_area.loc.y + self.options.layout.gaps,
-                    ));
+                    let size = axis.size(300., axis.cross_size(self.working_area.size) - gaps * 2.);
+                    let loc = axis.point(
+                        self.column_x(column_index) - axis.main_size(size) / 2. - gaps / 2.,
+                        axis.cross(self.working_area.loc) + gaps,
+                    );
                     Rectangle::new(loc, size)
                 }
             }
@@ -2568,39 +2562,41 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
                 let is_tabbed = col.display_mode == ColumnDisplay::Tabbed;
 
-                let (height, y) = if is_tabbed {
+                // height/y here are the hint extent and position along the tile-stacking
+                // (cross) axis: y in horizontal, x in vertical.
+                let (hint_cross, cross_pos) = if is_tabbed {
                     // In tabbed mode, there's only one tile visible, and we want to draw the hint
-                    // at its top or bottom.
-                    let top = col.tile_offset(col.active_tile_idx).y;
-                    let bottom = top + col.data[col.active_tile_idx].size.h;
+                    // at its near or far edge.
+                    let near = axis.cross(col.tile_offset(col.active_tile_idx));
+                    let far = near + axis.cross_size(col.data[col.active_tile_idx].size);
 
                     if tile_index <= col.active_tile_idx {
-                        (150., top)
+                        (150., near)
                     } else {
-                        (150., bottom - 150.)
+                        (150., far - 150.)
                     }
                 } else {
-                    let top = col.tile_offset(tile_index).y;
+                    let near = axis.cross(col.tile_offset(tile_index));
 
                     if tile_index == 0 {
-                        (150., top)
+                        (150., near)
                     } else if tile_index == col.tiles.len() {
-                        (150., top - self.options.layout.gaps - 150.)
+                        (150., near - self.options.layout.gaps - 150.)
                     } else {
-                        (300., top - self.options.layout.gaps / 2. - 150.)
+                        (300., near - self.options.layout.gaps / 2. - 150.)
                     }
                 };
 
                 // Adjust for place-within-column tab indicator.
-                let origin_x = col.tiles_origin().x;
-                let extra_w = if is_tabbed && col.sizing_mode().is_normal() {
-                    col.tab_indicator.extra_size(col.tiles.len(), col.scale).w
+                let origin_main = axis.main(col.tiles_origin());
+                let extra_main = if is_tabbed && col.sizing_mode().is_normal() {
+                    axis.main_size(col.tab_indicator.extra_size(col.tiles.len(), col.scale))
                 } else {
                     0.
                 };
 
-                let size = Size::from((self.data[column_index].width - extra_w, height));
-                let loc = Point::from((self.column_x(column_index) + origin_x, y));
+                let size = axis.size(self.data[column_index].width - extra_main, hint_cross);
+                let loc = axis.point(self.column_x(column_index) + origin_main, cross_pos);
                 Rectangle::new(loc, size)
             }
             InsertPosition::Floating => return None,
@@ -2609,7 +2605,6 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         // First window on an empty workspace will cancel out any view offset. Replicate this
         // effect here.
         if self.columns.is_empty() {
-            let axis = self.options.scroll_axis;
             let view_offset = if self.is_centering_focused_column() {
                 self.compute_new_view_offset_centered(
                     Some(0.),
@@ -2653,20 +2648,20 @@ impl<W: LayoutElement> ScrollingSpace<W> {
     }
 
     pub fn popup_target_rect(&self, id: &W::Id) -> Option<Rectangle<f64, Logical>> {
+        let axis = self.options.scroll_axis;
         for col in &self.columns {
             for (tile, pos) in col.tiles() {
                 if tile.window().id() == id {
-                    // In the scrolling layout, we try to position popups horizontally within the
-                    // window geometry (so they remain visible even if the window scrolls flush with
-                    // the left/right edge of the screen), and vertically within the whole parent
-                    // working area.
-                    let width = tile.window_size().w;
-                    let height = self.parent_area.size.h;
+                    // Popups span the window along the scroll (main) axis so they stay visible at a
+                    // scroll-edge, and the whole parent working area along the cross axis.
+                    let main_extent = axis.main_size(tile.window_size());
+                    let cross_extent = axis.cross_size(self.parent_area.size);
 
-                    let mut target = Rectangle::from_size(Size::from((width, height)));
-                    target.loc.y += self.parent_area.loc.y;
-                    target.loc.y -= pos.y;
-                    target.loc.y -= tile.window_loc().y;
+                    let mut target = Rectangle::from_size(axis.size(main_extent, cross_extent));
+                    let cross_loc = axis.cross(self.parent_area.loc)
+                        - axis.cross(pos)
+                        - axis.cross(tile.window_loc());
+                    target.loc = axis.add_cross(target.loc, cross_loc);
 
                     return Some(target);
                 }
@@ -2886,7 +2881,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
         let col = &mut self.columns[self.active_column_idx];
 
-        let available_width = working_w - gap - width_taken - col.extra_size().w;
+        let available_width = working_w - gap - width_taken - axis.main_size(col.extra_size());
         if available_width <= 0. {
             // Nowhere to expand.
             return;
@@ -4905,19 +4900,19 @@ impl<W: LayoutElement> Column<W> {
             return false;
         }
 
-        let mut ys = self.tile_offsets().skip(self.active_tile_idx);
-        let active_y = ys.next().unwrap().y;
-        let next_y = ys.next().unwrap().y;
-        drop(ys);
+        let mut offs = self.tile_offsets().skip(self.active_tile_idx);
+        let active_off = offs.next().unwrap();
+        let next_off = offs.next().unwrap();
+        drop(offs);
 
         self.tiles.swap(self.active_tile_idx, new_idx);
         self.data.swap(self.active_tile_idx, new_idx);
         self.active_tile_idx = new_idx;
 
-        // Animate the movement.
-        let new_active_y = self.tile_offset(new_idx).y;
-        self.tiles[new_idx].animate_move_y_from(active_y - new_active_y);
-        self.tiles[new_idx + 1].animate_move_y_from(active_y - next_y);
+        // Animate the movement along whichever axis tiles stack on.
+        let new_active_off = self.tile_offset(new_idx);
+        self.tiles[new_idx].animate_move_from(active_off - new_active_off);
+        self.tiles[new_idx + 1].animate_move_from(active_off - next_off);
 
         true
     }
@@ -4928,19 +4923,19 @@ impl<W: LayoutElement> Column<W> {
             return false;
         }
 
-        let mut ys = self.tile_offsets().skip(self.active_tile_idx);
-        let active_y = ys.next().unwrap().y;
-        let next_y = ys.next().unwrap().y;
-        drop(ys);
+        let mut offs = self.tile_offsets().skip(self.active_tile_idx);
+        let active_off = offs.next().unwrap();
+        let next_off = offs.next().unwrap();
+        drop(offs);
 
         self.tiles.swap(self.active_tile_idx, new_idx);
         self.data.swap(self.active_tile_idx, new_idx);
         self.active_tile_idx = new_idx;
 
-        // Animate the movement.
-        let new_active_y = self.tile_offset(new_idx).y;
-        self.tiles[new_idx].animate_move_y_from(active_y - new_active_y);
-        self.tiles[new_idx - 1].animate_move_y_from(next_y - active_y);
+        // Animate the movement along whichever axis tiles stack on.
+        let new_active_off = self.tile_offset(new_idx);
+        self.tiles[new_idx].animate_move_from(active_off - new_active_off);
+        self.tiles[new_idx - 1].animate_move_from(next_off - active_off);
 
         true
     }
@@ -5076,17 +5071,22 @@ impl<W: LayoutElement> Column<W> {
             self.convert_heights_to_auto();
         }
 
+        // A window's "height" is its extent along the tile-stacking (cross) axis: screen
+        // height when scrolling horizontally, screen width when scrolling vertically.
+        let axis = self.options.scroll_axis;
         let current = self.data[tile_idx].height;
         let tile = &self.tiles[tile_idx];
         let current_window_px = match current {
-            WindowHeight::Auto { .. } | WindowHeight::Preset(_) => tile.window_size().h,
+            WindowHeight::Auto { .. } | WindowHeight::Preset(_) => {
+                axis.cross_size(tile.window_size())
+            }
             WindowHeight::Fixed(height) => height,
         };
         let current_tile_px = tile.tile_height_for_window_height(current_window_px);
 
-        let working_size = self.working_area.size.h;
+        let working_size = axis.cross_size(self.working_area.size);
         let gaps = self.options.layout.gaps;
-        let extra_size = self.extra_size().h;
+        let extra_size = axis.cross_size(self.extra_size());
         let full = working_size - gaps;
         let current_prop = if full == 0. {
             1.
@@ -5119,7 +5119,7 @@ impl<W: LayoutElement> Column<W> {
                 .iter()
                 .enumerate()
                 .filter(|(idx, _)| *idx != tile_idx)
-                .map(|(_, tile)| f64::max(1., tile.min_size_nonfullscreen().h) + gaps)
+                .map(|(_, tile)| f64::max(1., axis.cross_size(tile.min_size_nonfullscreen())) + gaps)
                 .sum::<f64>()
         };
         let height_left = working_size - extra_size - gaps - min_height_taken - gaps;
@@ -5128,8 +5128,8 @@ impl<W: LayoutElement> Column<W> {
 
         // Clamp it against the window height constraints.
         let win = &self.tiles[tile_idx].window();
-        let min_h = win.min_size().h;
-        let max_h = win.max_size().h;
+        let min_h = axis.cross_size(win.min_size());
+        let max_h = axis.cross_size(win.max_size());
 
         if max_h > 0 {
             window_height = f64::min(window_height, f64::from(max_h));
@@ -5279,17 +5279,17 @@ impl<W: LayoutElement> Column<W> {
         let origin_delta = prev_origin - new_origin;
 
         // When need to walk the tiles in the normal display mode to get the right offsets.
+        let axis = self.options.scroll_axis;
         self.display_mode = ColumnDisplay::Normal;
         for (tile, pos) in self.tiles_mut() {
-            let mut y_delta = pos.y - prev_origin.y;
+            let mut cross_delta = axis.cross(pos) - axis.cross(prev_origin);
 
-            // Invert the Y motion when transitioning *to* normal display mode.
+            // Invert the stacking-axis motion when transitioning *to* normal display mode.
             if display == ColumnDisplay::Normal {
-                y_delta *= -1.;
+                cross_delta *= -1.;
             }
 
-            let mut delta = origin_delta;
-            delta.y += y_delta;
+            let delta = axis.add_cross(origin_delta, cross_delta);
             tile.animate_move_from(delta);
         }
 

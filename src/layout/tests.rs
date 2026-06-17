@@ -4062,10 +4062,11 @@ fn vertical_window_spans_full_width() {
     assert!(v.h < h.h, "vertical shorter on the main axis: h={h:?} v={v:?}");
 }
 
-fn transpose_layout_geometry(
+fn build_transpose_layout(
     scroll_axis: ScrollAxis,
     output_size: (i32, i32),
-) -> Vec<(Point<f64, Logical>, Size<f64, Logical>)> {
+    extra_ops: &[Op],
+) -> Layout<TestWindow> {
     let options = Options {
         scroll_axis,
         ..Default::default()
@@ -4100,7 +4101,9 @@ fn transpose_layout_geometry(
     });
     layout.add_output(output, None);
 
-    let ops = [
+    // One two-tile column beside a one-tile column exercises column positions, tile
+    // stacking, and sizes; extra_ops layer resize or other mutations before settling.
+    let mut ops = vec![
         Op::AddWindow {
             params: TestWindowParams::new(1),
         },
@@ -4110,17 +4113,25 @@ fn transpose_layout_geometry(
         Op::AddWindow {
             params: TestWindowParams::new(3),
         },
-        // One two-tile column beside a one-tile column exercises column positions,
-        // tile stacking, and tile sizes in a single layout.
         Op::FocusColumnFirst,
         Op::ConsumeWindowIntoColumn,
         Op::Communicate(1),
         Op::Communicate(2),
         Op::Communicate(3),
-        Op::AdvanceAnimations { msec_delta: 1000 },
     ];
+    ops.extend_from_slice(extra_ops);
+    ops.push(Op::Communicate(1));
+    ops.push(Op::Communicate(2));
+    ops.push(Op::Communicate(3));
+    ops.push(Op::AdvanceAnimations { msec_delta: 1000 });
     check_ops_on_layout(&mut layout, ops);
 
+    layout
+}
+
+fn transpose_tile_geometry(
+    layout: &Layout<TestWindow>,
+) -> Vec<(Point<f64, Logical>, Size<f64, Logical>)> {
     layout
         .active_workspace()
         .unwrap()
@@ -4130,24 +4141,66 @@ fn transpose_layout_geometry(
         .collect()
 }
 
+#[track_caller]
+fn assert_point_transposed(h: Point<f64, Logical>, v: Point<f64, Logical>, ctx: &str) {
+    assert!(
+        (v.x - h.y).abs() < 0.5 && (v.y - h.x).abs() < 0.5,
+        "{ctx} position not transposed: h={h:?} v={v:?}"
+    );
+}
+
+#[track_caller]
+fn assert_size_transposed(h: Size<f64, Logical>, v: Size<f64, Logical>, ctx: &str) {
+    assert!(
+        (v.w - h.h).abs() < 0.5 && (v.h - h.w).abs() < 0.5,
+        "{ctx} size not transposed: h={h:?} v={v:?}"
+    );
+}
+
 #[test]
 fn vertical_layout_is_horizontal_transposed() {
     // Same ops on a landscape vs a dimension-swapped portrait output must produce
     // x<->y / w<->h mirror geometry; fails if any cluster transposes only one axis.
-    let h = transpose_layout_geometry(ScrollAxis::Horizontal, (1280, 720));
-    let v = transpose_layout_geometry(ScrollAxis::Vertical, (720, 1280));
+    let h = transpose_tile_geometry(&build_transpose_layout(ScrollAxis::Horizontal, (1280, 720), &[]));
+    let v = transpose_tile_geometry(&build_transpose_layout(ScrollAxis::Vertical, (720, 1280), &[]));
 
     assert_eq!(h.len(), 3, "three tiles laid out");
     assert_eq!(v.len(), h.len(), "same tile count both orientations");
 
     for (i, ((hp, hs), (vp, vs))) in h.iter().zip(v.iter()).enumerate() {
-        assert!(
-            (vp.x - hp.y).abs() < 0.5 && (vp.y - hp.x).abs() < 0.5,
-            "tile {i} position not transposed: h={hp:?} v={vp:?}"
-        );
-        assert!(
-            (vs.w - hs.h).abs() < 0.5 && (vs.h - hs.w).abs() < 0.5,
-            "tile {i} size not transposed: h={hs:?} v={vs:?}"
-        );
+        assert_point_transposed(*hp, *vp, &format!("tile {i}"));
+        assert_size_transposed(*hs, *vs, &format!("tile {i}"));
+    }
+}
+
+#[test]
+fn vertical_window_height_resize_transposed() {
+    // Resizing a window's stacking extent must transpose: under Vertical the budget
+    // comes from the cross (width) extent, not screen height (set_window_height).
+    let resize = [Op::SetWindowHeight {
+        id: Some(1),
+        change: SizeChange::SetProportion(60.),
+    }];
+    let h = transpose_tile_geometry(&build_transpose_layout(ScrollAxis::Horizontal, (1280, 720), &resize));
+    let v = transpose_tile_geometry(&build_transpose_layout(ScrollAxis::Vertical, (720, 1280), &resize));
+
+    assert_eq!(h.len(), 3, "three tiles laid out");
+    for (i, ((hp, hs), (vp, vs))) in h.iter().zip(v.iter()).enumerate() {
+        assert_point_transposed(*hp, *vp, &format!("resized tile {i}"));
+        assert_size_transposed(*hs, *vs, &format!("resized tile {i}"));
+    }
+}
+
+#[test]
+fn vertical_insert_hint_transposed() {
+    // The drag-insert hint rect must transpose for a new-column and an in-column hint.
+    let h = build_transpose_layout(ScrollAxis::Horizontal, (1280, 720), &[]);
+    let v = build_transpose_layout(ScrollAxis::Vertical, (720, 1280), &[]);
+
+    for pos in [InsertPosition::NewColumn(1), InsertPosition::InColumn(0, 1)] {
+        let hr = h.active_workspace().unwrap().scrolling().insert_hint_area(pos).unwrap();
+        let vr = v.active_workspace().unwrap().scrolling().insert_hint_area(pos).unwrap();
+        assert_point_transposed(hr.loc, vr.loc, &format!("{pos:?} hint loc"));
+        assert_size_transposed(hr.size, vr.size, &format!("{pos:?} hint"));
     }
 }
