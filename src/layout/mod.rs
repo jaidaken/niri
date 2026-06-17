@@ -662,13 +662,14 @@ impl Options {
             disable_resize_throttling: config.debug.disable_resize_throttling,
             disable_transactions: config.debug.disable_transactions,
             deactivate_unfocused_windows: config.debug.deactivate_unfocused_windows,
-            scroll_axis: ScrollAxis::default(),
+            scroll_axis: config.layout.scroll_direction.into(),
         }
     }
 
     fn with_merged_layout(mut self, part: Option<&niri_config::LayoutPart>) -> Self {
         if let Some(part) = part {
             self.layout.merge_with(part);
+            self.scroll_axis = self.layout.scroll_direction.into();
         }
         self
     }

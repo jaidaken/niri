@@ -87,6 +87,15 @@ impl ScrollAxis {
     }
 }
 
+impl From<niri_config::ScrollDirection> for ScrollAxis {
+    fn from(direction: niri_config::ScrollDirection) -> Self {
+        match direction {
+            niri_config::ScrollDirection::Horizontal => ScrollAxis::Horizontal,
+            niri_config::ScrollDirection::Vertical => ScrollAxis::Vertical,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use smithay::utils::{Logical, Point, Size};

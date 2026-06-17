@@ -21,6 +21,7 @@ pub struct Layout {
     pub always_center_single_column: bool,
     pub empty_workspace_above_first: bool,
     pub default_column_display: ColumnDisplay,
+    pub scroll_direction: ScrollDirection,
     pub gaps: f64,
     pub struts: Struts,
     pub background_color: Color,
@@ -44,6 +45,7 @@ impl Default for Layout {
             always_center_single_column: false,
             empty_workspace_above_first: false,
             default_column_display: ColumnDisplay::Normal,
+            scroll_direction: ScrollDirection::Horizontal,
             gaps: 16.,
             struts: Struts::default(),
             preset_window_heights: vec![
@@ -76,6 +78,7 @@ impl MergeWith<LayoutPart> for Layout {
             preset_window_heights,
             center_focused_column,
             default_column_display,
+            scroll_direction,
             struts,
             background_color,
         );
@@ -120,6 +123,8 @@ pub struct LayoutPart {
     pub empty_workspace_above_first: Option<Flag>,
     #[knuffel(child, unwrap(argument, str))]
     pub default_column_display: Option<ColumnDisplay>,
+    #[knuffel(child, unwrap(argument))]
+    pub scroll_direction: Option<ScrollDirection>,
     #[knuffel(child, unwrap(argument))]
     pub gaps: Option<FloatOrInt<0, 65535>>,
     #[knuffel(child)]
@@ -168,6 +173,15 @@ pub enum CenterFocusedColumn {
     /// Focusing a column will center it if it doesn't fit on the screen together with the
     /// previously focused column.
     OnOverflow,
+}
+
+#[derive(knuffel::DecodeScalar, Debug, Default, PartialEq, Eq, Clone, Copy)]
+pub enum ScrollDirection {
+    /// Columns scroll left and right; windows stack downward. The default.
+    #[default]
+    Horizontal,
+    /// Columns scroll up and down; windows stack across. For portrait monitors.
+    Vertical,
 }
 
 impl<S> knuffel::Decode<S> for DefaultPresetSize
