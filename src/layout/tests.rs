@@ -3989,8 +3989,9 @@ fn two_tile_column_positions(scroll_axis: ScrollAxis) -> Vec<Point<f64, Logical>
         Op::AddWindow {
             params: TestWindowParams::new(2),
         },
-        // Focus the left column, then pull the right window into it: one column, two tiles.
-        Op::FocusColumnLeft,
+        // Focus the first column (orientation-independent), then pull the next window
+        // into it: one column, two tiles.
+        Op::FocusColumnFirst,
         Op::ConsumeWindowIntoColumn,
         Op::AdvanceAnimations { msec_delta: 1000 },
     ];

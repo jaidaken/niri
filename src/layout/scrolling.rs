@@ -1580,7 +1580,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             .any(|col| col.start_open_animation(id))
     }
 
-    pub fn focus_left(&mut self) -> bool {
+    fn focus_column_prev(&mut self) -> bool {
         if self.active_column_idx == 0 {
             return false;
         }
@@ -1588,13 +1588,29 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         true
     }
 
-    pub fn focus_right(&mut self) -> bool {
+    fn focus_column_next(&mut self) -> bool {
         if self.active_column_idx + 1 >= self.columns.len() {
             return false;
         }
 
         self.activate_column(self.active_column_idx + 1);
         true
+    }
+
+    // Screen-relative: left/right walk the main (scroll) axis when horizontal, the
+    // cross (stacking) axis when vertical.
+    pub fn focus_left(&mut self) -> bool {
+        match self.options.scroll_axis {
+            ScrollAxis::Horizontal => self.focus_column_prev(),
+            ScrollAxis::Vertical => self.focus_tile_prev(),
+        }
+    }
+
+    pub fn focus_right(&mut self) -> bool {
+        match self.options.scroll_axis {
+            ScrollAxis::Horizontal => self.focus_column_next(),
+            ScrollAxis::Vertical => self.focus_tile_next(),
+        }
     }
 
     pub fn focus_column_first(&mut self) {
@@ -1625,7 +1641,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         self.columns[self.active_column_idx].focus_index(index);
     }
 
-    pub fn focus_down(&mut self) -> bool {
+    fn focus_tile_next(&mut self) -> bool {
         if self.columns.is_empty() {
             return false;
         }
@@ -1633,7 +1649,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         self.columns[self.active_column_idx].focus_down()
     }
 
-    pub fn focus_up(&mut self) -> bool {
+    fn focus_tile_prev(&mut self) -> bool {
         if self.columns.is_empty() {
             return false;
         }
@@ -1641,46 +1657,40 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         self.columns[self.active_column_idx].focus_up()
     }
 
-    pub fn focus_down_or_left(&mut self) {
-        if self.columns.is_empty() {
-            return;
+    pub fn focus_down(&mut self) -> bool {
+        match self.options.scroll_axis {
+            ScrollAxis::Horizontal => self.focus_tile_next(),
+            ScrollAxis::Vertical => self.focus_column_next(),
         }
+    }
 
-        let column = &mut self.columns[self.active_column_idx];
-        if !column.focus_down() {
+    pub fn focus_up(&mut self) -> bool {
+        match self.options.scroll_axis {
+            ScrollAxis::Horizontal => self.focus_tile_prev(),
+            ScrollAxis::Vertical => self.focus_column_prev(),
+        }
+    }
+
+    pub fn focus_down_or_left(&mut self) {
+        if !self.focus_down() {
             self.focus_left();
         }
     }
 
     pub fn focus_down_or_right(&mut self) {
-        if self.columns.is_empty() {
-            return;
-        }
-
-        let column = &mut self.columns[self.active_column_idx];
-        if !column.focus_down() {
+        if !self.focus_down() {
             self.focus_right();
         }
     }
 
     pub fn focus_up_or_left(&mut self) {
-        if self.columns.is_empty() {
-            return;
-        }
-
-        let column = &mut self.columns[self.active_column_idx];
-        if !column.focus_up() {
+        if !self.focus_up() {
             self.focus_left();
         }
     }
 
     pub fn focus_up_or_right(&mut self) {
-        if self.columns.is_empty() {
-            return;
-        }
-
-        let column = &mut self.columns[self.active_column_idx];
-        if !column.focus_up() {
+        if !self.focus_up() {
             self.focus_right();
         }
     }
@@ -1746,7 +1756,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         self.activate_column_with_anim_config(new_idx, self.options.animations.window_movement.0);
     }
 
-    pub fn move_left(&mut self) -> bool {
+    fn move_column_prev(&mut self) -> bool {
         if self.active_column_idx == 0 {
             return false;
         }
@@ -1755,7 +1765,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         true
     }
 
-    pub fn move_right(&mut self) -> bool {
+    fn move_column_next(&mut self) -> bool {
         let new_idx = self.active_column_idx + 1;
         if new_idx >= self.columns.len() {
             return false;
@@ -1763,6 +1773,20 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
         self.move_column_to(new_idx);
         true
+    }
+
+    pub fn move_left(&mut self) -> bool {
+        match self.options.scroll_axis {
+            ScrollAxis::Horizontal => self.move_column_prev(),
+            ScrollAxis::Vertical => self.move_tile_prev(),
+        }
+    }
+
+    pub fn move_right(&mut self) -> bool {
+        match self.options.scroll_axis {
+            ScrollAxis::Horizontal => self.move_column_next(),
+            ScrollAxis::Vertical => self.move_tile_next(),
+        }
     }
 
     pub fn move_column_to_first(&mut self) {
@@ -1778,7 +1802,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         self.move_column_to(new_idx);
     }
 
-    pub fn move_down(&mut self) -> bool {
+    fn move_tile_next(&mut self) -> bool {
         if self.columns.is_empty() {
             return false;
         }
@@ -1786,12 +1810,26 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         self.columns[self.active_column_idx].move_down()
     }
 
-    pub fn move_up(&mut self) -> bool {
+    fn move_tile_prev(&mut self) -> bool {
         if self.columns.is_empty() {
             return false;
         }
 
         self.columns[self.active_column_idx].move_up()
+    }
+
+    pub fn move_down(&mut self) -> bool {
+        match self.options.scroll_axis {
+            ScrollAxis::Horizontal => self.move_tile_next(),
+            ScrollAxis::Vertical => self.move_column_next(),
+        }
+    }
+
+    pub fn move_up(&mut self) -> bool {
+        match self.options.scroll_axis {
+            ScrollAxis::Horizontal => self.move_tile_prev(),
+            ScrollAxis::Vertical => self.move_column_prev(),
+        }
     }
 
     pub fn consume_or_expel_window_left(&mut self, window: Option<&W::Id>) {
