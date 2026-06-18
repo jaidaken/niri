@@ -6301,6 +6301,12 @@ impl Niri {
             return;
         }
 
+        // Only follow when a window boundary crossed under the pointer this refresh; pointer_contents
+        // still holds last refresh's window (update_pointer_contents runs after this), so equal = no cross.
+        if self.pointer_contents.window.as_ref().map(|(w, _)| w) == Some(&window) {
+            return;
+        }
+
         // Already focused: nothing to do, and avoids emitting redundant focus changes.
         if self.layout.focus().map(|w| &w.window) == Some(&window) {
             return;
